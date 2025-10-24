@@ -1,0 +1,541 @@
+=== PPU Rendering Trace ===
+Format: [Frame] Scanline | Event | Details
+========================================
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2100] = $f
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2101] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2102] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2103] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2105] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2106] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2107] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2108] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2109] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$210a] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$210b] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$210c] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$210d] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$210e] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$210f] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2110] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2111] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2112] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2113] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2114] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2115] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2116] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2117] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2118] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2119] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$211a] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$211b] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$211c] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$211d] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$211e] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$211f] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2120] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2121] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2122] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2123] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2124] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2125] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2126] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2127] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2128] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2129] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$212a] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$212b] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$212c] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$212d] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$212e] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$212f] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2130] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2131] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2132] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2133] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2134] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2135] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2136] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2137] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2138] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2139] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$213a] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$213b] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$213c] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$213d] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$213e] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$213f] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2140] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2141] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2142] = $0
+
+[Cyc:0000000000 F:0000] Scanline:000 | PPU Write: [$2143] = $0
+
+[Cyc:0000000001 F:0000] Scanline:000 | PPU Write: [$4200] = $0
+
+[Cyc:0000000009 F:0000] Scanline:000 | PPU Write: [$2100] = $80
+
+[Cyc:0000051150 F:0000] Scanline:225 | Event: V-Blank Start | NMI:Disabled
+[Cyc:0000051179 F:0000] Scanline:225 | PPU Write: [$2100] = $80
+
+[Cyc:0000051182 F:0000] Scanline:225 | PPU Write: [$2123] = $0
+
+[Cyc:0000051184 F:0000] Scanline:225 | PPU Write: [$2124] = $0
+
+[Cyc:0000051186 F:0000] Scanline:225 | PPU Write: [$2125] = $0
+
+[Cyc:0000051188 F:0000] Scanline:225 | PPU Write: [$2130] = $0
+
+[Cyc:0000051193 F:0000] Scanline:225 | PPU Write: [$2131] = $0
+
+[Cyc:0000051195 F:0000] Scanline:225 | PPU Write: [$2105] = $9
+
+[Cyc:0000059561 F:0001] Event: Frame Complete | Total Scanlines: 262
+[Cyc:0000110711 F:0001] Scanline:225 | Event: V-Blank Start | NMI:Disabled
+[Cyc:0000110740 F:0001] Scanline:225 | PPU Write: [$2100] = $80
+
+[Cyc:0000110743 F:0001] Scanline:225 | PPU Write: [$2123] = $0
+
+[Cyc:0000110745 F:0001] Scanline:225 | PPU Write: [$2124] = $0
+
+[Cyc:0000110747 F:0001] Scanline:225 | PPU Write: [$2125] = $0
+
+[Cyc:0000110749 F:0001] Scanline:225 | PPU Write: [$2130] = $0
+
+[Cyc:0000110754 F:0001] Scanline:225 | PPU Write: [$2131] = $0
+
+[Cyc:0000110756 F:0001] Scanline:225 | PPU Write: [$2105] = $9
+
+[Cyc:0000110763 F:0001] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000110765 F:0001] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000110769 F:0001] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000110772 F:0001] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000110774 F:0001] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000110776 F:0001] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000110778 F:0001] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000110780 F:0001] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000110785 F:0001] Scanline:225 | PPU Write: [$4209] = $24
+
+[Cyc:0000110786 F:0001] Scanline:225 | PPU Write: [$420a] = $0
+
+[Cyc:0000110789 F:0001] Scanline:225 | PPU Write: [$4200] = $a1
+
+[Cyc:0000110790 F:0001] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000110791 F:0001] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000110792 F:0001] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000110793 F:0001] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000110795 F:0001] Scanline:225 | PPU Write: [$2100] = $0
+
+[Cyc:0000119122 F:0002] Event: Frame Complete | Total Scanlines: 262
+[Cyc:0000170272 F:0002] Scanline:225 | Event: V-Blank Start | NMI:Enabled
+[Cyc:0000170301 F:0002] Scanline:225 | PPU Write: [$2100] = $80
+
+[Cyc:0000170304 F:0002] Scanline:225 | PPU Write: [$2123] = $0
+
+[Cyc:0000170306 F:0002] Scanline:225 | PPU Write: [$2124] = $0
+
+[Cyc:0000170308 F:0002] Scanline:225 | PPU Write: [$2125] = $0
+
+[Cyc:0000170310 F:0002] Scanline:225 | PPU Write: [$2130] = $0
+
+[Cyc:0000170315 F:0002] Scanline:225 | PPU Write: [$2131] = $0
+
+[Cyc:0000170317 F:0002] Scanline:225 | PPU Write: [$2105] = $9
+
+[Cyc:0000170324 F:0002] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000170326 F:0002] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000170330 F:0002] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000170333 F:0002] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000170335 F:0002] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000170337 F:0002] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000170339 F:0002] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000170341 F:0002] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000170346 F:0002] Scanline:225 | PPU Write: [$4209] = $24
+
+[Cyc:0000170347 F:0002] Scanline:225 | PPU Write: [$420a] = $0
+
+[Cyc:0000170350 F:0002] Scanline:225 | PPU Write: [$4200] = $a1
+
+[Cyc:0000170351 F:0002] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000170352 F:0002] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000170353 F:0002] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000170354 F:0002] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000170356 F:0002] Scanline:225 | PPU Write: [$2100] = $0
+
+[Cyc:0000178684 F:0003] Event: Frame Complete | Total Scanlines: 262
+[Cyc:0000229834 F:0003] Scanline:225 | Event: V-Blank Start | NMI:Enabled
+[Cyc:0000229863 F:0003] Scanline:225 | PPU Write: [$2100] = $80
+
+[Cyc:0000229866 F:0003] Scanline:225 | PPU Write: [$2123] = $0
+
+[Cyc:0000229868 F:0003] Scanline:225 | PPU Write: [$2124] = $0
+
+[Cyc:0000229870 F:0003] Scanline:225 | PPU Write: [$2125] = $0
+
+[Cyc:0000229872 F:0003] Scanline:225 | PPU Write: [$2130] = $0
+
+[Cyc:0000229877 F:0003] Scanline:225 | PPU Write: [$2131] = $0
+
+[Cyc:0000229879 F:0003] Scanline:225 | PPU Write: [$2105] = $9
+
+[Cyc:0000229886 F:0003] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000229888 F:0003] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000229892 F:0003] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000229895 F:0003] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000229897 F:0003] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000229899 F:0003] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000229901 F:0003] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000229903 F:0003] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000229908 F:0003] Scanline:225 | PPU Write: [$4209] = $24
+
+[Cyc:0000229909 F:0003] Scanline:225 | PPU Write: [$420a] = $0
+
+[Cyc:0000229912 F:0003] Scanline:225 | PPU Write: [$4200] = $a1
+
+[Cyc:0000229913 F:0003] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000229914 F:0003] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000229915 F:0003] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000229916 F:0003] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000229918 F:0003] Scanline:225 | PPU Write: [$2100] = $0
+
+[Cyc:0000238245 F:0004] Event: Frame Complete | Total Scanlines: 262
+[Cyc:0000289395 F:0004] Scanline:225 | Event: V-Blank Start | NMI:Enabled
+[Cyc:0000289424 F:0004] Scanline:225 | PPU Write: [$2100] = $80
+
+[Cyc:0000289427 F:0004] Scanline:225 | PPU Write: [$2123] = $0
+
+[Cyc:0000289429 F:0004] Scanline:225 | PPU Write: [$2124] = $0
+
+[Cyc:0000289431 F:0004] Scanline:225 | PPU Write: [$2125] = $0
+
+[Cyc:0000289433 F:0004] Scanline:225 | PPU Write: [$2130] = $0
+
+[Cyc:0000289438 F:0004] Scanline:225 | PPU Write: [$2131] = $0
+
+[Cyc:0000289440 F:0004] Scanline:225 | PPU Write: [$2105] = $9
+
+[Cyc:0000289447 F:0004] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000289449 F:0004] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000289453 F:0004] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000289456 F:0004] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000289458 F:0004] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000289460 F:0004] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000289462 F:0004] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000289464 F:0004] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000289469 F:0004] Scanline:225 | PPU Write: [$4209] = $24
+
+[Cyc:0000289470 F:0004] Scanline:225 | PPU Write: [$420a] = $0
+
+[Cyc:0000289473 F:0004] Scanline:225 | PPU Write: [$4200] = $a1
+
+[Cyc:0000289474 F:0004] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000289475 F:0004] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000289476 F:0004] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000289477 F:0004] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000289479 F:0004] Scanline:225 | PPU Write: [$2100] = $0
+
+[Cyc:0000297806 F:0005] Event: Frame Complete | Total Scanlines: 262
+[Cyc:0000348956 F:0005] Scanline:225 | Event: V-Blank Start | NMI:Enabled
+[Cyc:0000348985 F:0005] Scanline:225 | PPU Write: [$2100] = $80
+
+[Cyc:0000348988 F:0005] Scanline:225 | PPU Write: [$2123] = $0
+
+[Cyc:0000348990 F:0005] Scanline:225 | PPU Write: [$2124] = $0
+
+[Cyc:0000348992 F:0005] Scanline:225 | PPU Write: [$2125] = $0
+
+[Cyc:0000348994 F:0005] Scanline:225 | PPU Write: [$2130] = $0
+
+[Cyc:0000348999 F:0005] Scanline:225 | PPU Write: [$2131] = $0
+
+[Cyc:0000349001 F:0005] Scanline:225 | PPU Write: [$2105] = $9
+
+[Cyc:0000349008 F:0005] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000349010 F:0005] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000349014 F:0005] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000349017 F:0005] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000349019 F:0005] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000349021 F:0005] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000349023 F:0005] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000349025 F:0005] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000349030 F:0005] Scanline:225 | PPU Write: [$4209] = $24
+
+[Cyc:0000349031 F:0005] Scanline:225 | PPU Write: [$420a] = $0
+
+[Cyc:0000349034 F:0005] Scanline:225 | PPU Write: [$4200] = $a1
+
+[Cyc:0000349035 F:0005] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000349036 F:0005] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000349037 F:0005] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000349038 F:0005] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000349040 F:0005] Scanline:225 | PPU Write: [$2100] = $0
+
+[Cyc:0000357368 F:0006] Event: Frame Complete | Total Scanlines: 262
+[Cyc:0000408518 F:0006] Scanline:225 | Event: V-Blank Start | NMI:Enabled
+[Cyc:0000408547 F:0006] Scanline:225 | PPU Write: [$2100] = $80
+
+[Cyc:0000408550 F:0006] Scanline:225 | PPU Write: [$2123] = $0
+
+[Cyc:0000408552 F:0006] Scanline:225 | PPU Write: [$2124] = $0
+
+[Cyc:0000408554 F:0006] Scanline:225 | PPU Write: [$2125] = $0
+
+[Cyc:0000408556 F:0006] Scanline:225 | PPU Write: [$2130] = $0
+
+[Cyc:0000408561 F:0006] Scanline:225 | PPU Write: [$2131] = $0
+
+[Cyc:0000408563 F:0006] Scanline:225 | PPU Write: [$2105] = $9
+
+[Cyc:0000408570 F:0006] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000408572 F:0006] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000408576 F:0006] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000408579 F:0006] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000408581 F:0006] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000408583 F:0006] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000408585 F:0006] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000408587 F:0006] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000408592 F:0006] Scanline:225 | PPU Write: [$4209] = $24
+
+[Cyc:0000408593 F:0006] Scanline:225 | PPU Write: [$420a] = $0
+
+[Cyc:0000408596 F:0006] Scanline:225 | PPU Write: [$4200] = $a1
+
+[Cyc:0000408597 F:0006] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000408598 F:0006] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000408599 F:0006] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000408600 F:0006] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000408602 F:0006] Scanline:225 | PPU Write: [$2100] = $0
+
+[Cyc:0000416929 F:0007] Event: Frame Complete | Total Scanlines: 262
+[Cyc:0000468079 F:0007] Scanline:225 | Event: V-Blank Start | NMI:Enabled
+[Cyc:0000468108 F:0007] Scanline:225 | PPU Write: [$2100] = $80
+
+[Cyc:0000468111 F:0007] Scanline:225 | PPU Write: [$2123] = $0
+
+[Cyc:0000468113 F:0007] Scanline:225 | PPU Write: [$2124] = $0
+
+[Cyc:0000468115 F:0007] Scanline:225 | PPU Write: [$2125] = $0
+
+[Cyc:0000468117 F:0007] Scanline:225 | PPU Write: [$2130] = $0
+
+[Cyc:0000468122 F:0007] Scanline:225 | PPU Write: [$2131] = $0
+
+[Cyc:0000468124 F:0007] Scanline:225 | PPU Write: [$2105] = $9
+
+[Cyc:0000468131 F:0007] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000468133 F:0007] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000468137 F:0007] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000468140 F:0007] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000468142 F:0007] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000468144 F:0007] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000468146 F:0007] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000468148 F:0007] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000468153 F:0007] Scanline:225 | PPU Write: [$4209] = $24
+
+[Cyc:0000468154 F:0007] Scanline:225 | PPU Write: [$420a] = $0
+
+[Cyc:0000468157 F:0007] Scanline:225 | PPU Write: [$4200] = $a1
+
+[Cyc:0000468158 F:0007] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000468159 F:0007] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000468160 F:0007] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000468161 F:0007] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000468163 F:0007] Scanline:225 | PPU Write: [$2100] = $0
+
+[Cyc:0000476490 F:0008] Event: Frame Complete | Total Scanlines: 262
+[Cyc:0000527640 F:0008] Scanline:225 | Event: V-Blank Start | NMI:Enabled
+[Cyc:0000527669 F:0008] Scanline:225 | PPU Write: [$2100] = $80
+
+[Cyc:0000527672 F:0008] Scanline:225 | PPU Write: [$2123] = $0
+
+[Cyc:0000527674 F:0008] Scanline:225 | PPU Write: [$2124] = $0
+
+[Cyc:0000527676 F:0008] Scanline:225 | PPU Write: [$2125] = $0
+
+[Cyc:0000527678 F:0008] Scanline:225 | PPU Write: [$2130] = $0
+
+[Cyc:0000527683 F:0008] Scanline:225 | PPU Write: [$2131] = $0
+
+[Cyc:0000527685 F:0008] Scanline:225 | PPU Write: [$2105] = $9
+
+[Cyc:0000527692 F:0008] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000527694 F:0008] Scanline:225 | PPU Write: [$210d] = $0
+
+[Cyc:0000527698 F:0008] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000527701 F:0008] Scanline:225 | PPU Write: [$210e] = $0
+
+[Cyc:0000527703 F:0008] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000527705 F:0008] Scanline:225 | PPU Write: [$210f] = $0
+
+[Cyc:0000527707 F:0008] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000527709 F:0008] Scanline:225 | PPU Write: [$2110] = $0
+
+[Cyc:0000527714 F:0008] Scanline:225 | PPU Write: [$4209] = $24
+
+[Cyc:0000527715 F:0008] Scanline:225 | PPU Write: [$420a] = $0
+
+[Cyc:0000527718 F:0008] Scanline:225 | PPU Write: [$4200] = $a1
+
+[Cyc:0000527719 F:0008] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000527720 F:0008] Scanline:225 | PPU Write: [$2111] = $0
+
+[Cyc:0000527721 F:0008] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000527722 F:0008] Scanline:225 | PPU Write: [$2112] = $0
+
+[Cyc:0000527724 F:0008] Scanline:225 | PPU Write: [$2100] = $0
+
+[Cyc:0000536052 F:0009] Event: Frame Complete | Total Scanlines: 262

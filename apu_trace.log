@@ -1,0 +1,3 @@
+=== APU (SPC700) Execution Trace ===
+Format: [Frame] PC | Opcode | A | X | Y | SP | PSW | Instruction
+========================================
