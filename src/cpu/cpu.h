@@ -21,11 +21,15 @@ public:
     uint8_t getP() const { return m_p; }
     uint8_t getPBR() const { return m_pbr; }
     uint8_t getDBR() const { return m_dbr; }
-    uint8_t getSP() const { return m_sp; }
+    uint16_t getSP() const { return m_sp; }
     uint64_t getCycles() const { return m_cycles; }
     bool getEmulationMode() const { return m_emulationMode; }
     
     void setPC(uint16_t pc) { m_pc = pc; }
+    
+    // Logging control
+    void setLogSuppression(bool enabled) { m_suppressLogging = enabled; }
+    bool shouldSuppressLogging() const { return m_suppressLogging; }
     
 private:
     Memory* m_memory;
@@ -33,7 +37,7 @@ private:
     uint16_t m_pc;      // Program Counter
     uint16_t m_a;       // Accumulator
     uint16_t m_x, m_y;  // Index registers
-    uint8_t m_sp;       // Stack Pointer (8-bit, page 1: 0x0100-0x01FF)
+    uint16_t m_sp;      // Stack Pointer (16-bit for Native Mode, 8-bit for Emulation Mode)
     uint8_t m_p;        // Status flags
     uint64_t m_cycles;
     
@@ -51,20 +55,23 @@ private:
     uint8_t m_dbr;       // Data Bank register
     uint8_t m_pbr;       // Program Bank register
     
+    // Logging control
+    bool m_suppressLogging;
+    
     void executeInstruction(uint8_t opcode);
     void handleNMI();
     void updateModeFlags();  // Update M, X flags from P register
     
     // Flag status test functions
-    bool isZero() const { return (m_p & 0x02) != 0; }
-    bool isNegative() const { return (m_p & 0x80) != 0; }
     bool isCarry() const { return (m_p & 0x01) != 0; }
-    bool isOverflow() const { return (m_p & 0x40) != 0; }
+    bool isZero() const { return (m_p & 0x02) != 0; }
     bool isInterruptDisable() const { return (m_p & 0x04) != 0; }
     bool isDecimal() const { return (m_p & 0x08) != 0; }
     bool isBreak() const { return (m_p & 0x10) != 0; }
-    bool isAccumulator8bit() const { return (m_p & 0x20) != 0; }
     bool isIndex8bit() const { return (m_p & 0x10) != 0; }
+    bool isAccumulator8bit() const { return (m_p & 0x20) != 0; }
+    bool isOverflow() const { return (m_p & 0x40) != 0; }
+    bool isNegative() const { return (m_p & 0x80) != 0; }
     
     // Flag setting functions
     void setZero(bool value) { m_p = (m_p & ~0x02) | (value ? 0x02 : 0); }
@@ -86,6 +93,11 @@ private:
         setZero(value == 0);
         setNegative(value & 0x80);
     }
+    void pushStack(uint8_t value);
+    uint8_t pullStack();
+    void pushStack16(uint16_t value);
+    uint16_t pullStack16();
+    void stackTrace();
     
     // Helper functions for 16-bit operations
     uint16_t read16bit(uint16_t address);

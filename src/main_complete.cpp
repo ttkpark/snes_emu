@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <windows.h>
 #include <iomanip>
+#include <chrono>
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #include "cpu/cpu.h"
@@ -60,8 +61,11 @@ int main(int argc, char* argv[]) {
     }
     
     // Load ROM
-    std::string romPath1 = "SNES Test Program.sfc";
-    std::string romPath = "Super Mario World (Europe) (Rev 1).sfc";
+    std::string romPath = "cputest-basic.sfc";
+    if (argc > 1) {
+        romPath = argv[1];
+        std::cout << "Loading ROM from command line: " << romPath << std::endl;
+    }
     std::ifstream romFile(romPath, std::ios::binary);
     if (!romFile) {
         std::cout << "Error: Could not open ROM file: " << romPath << std::endl;
@@ -97,6 +101,7 @@ int main(int argc, char* argv[]) {
     memory.setPPU(&ppu);
     memory.setAPU(&apu);
     memory.setInput(&input);
+    cpu.setPPU(&ppu);  // Set PPU reference in CPU for VRAM dumps
     ppu.setCPU(&cpu);
     apu.setCPU(&cpu);
     
@@ -577,6 +582,10 @@ int main(int argc, char* argv[]) {
     
     bool running = true;
     uint64_t frameCount = 0;
+    
+        // Test timer - run for 30 seconds for basic CPU tests
+        auto startTime = std::chrono::high_resolution_clock::now();
+        const auto testDuration = std::chrono::seconds(30);
     uint64_t cycleCount = 0;
     SDL_Event event;
     
@@ -584,6 +593,12 @@ int main(int argc, char* argv[]) {
     std::cout << "Controls: Arrow keys, Z/X/A/S for buttons" << std::endl;
     
     while (running) {
+        // Check if 1 second has passed
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        if (currentTime - startTime >= testDuration) {
+            std::cout << "Test completed after 1 second." << std::endl;
+            break;
+        }
         
         // SNES Hardware Clock Synchronization
         // Master Clock: 21.477272 MHz
@@ -606,8 +621,8 @@ int main(int argc, char* argv[]) {
             cpu.step();
             cycleCount++;
             
-            // Print vectors every 20000 cycles
-            if (cycleCount % 20000 == 0) {
+            // Print vectors every 100000 cycles (reduced for testing)
+            if (cycleCount % 100000 == 0) {
                 std::vector<uint16_t> runtimeVectors(6);
                 
                 // Determine vector base address based on CPU mode

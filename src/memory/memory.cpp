@@ -1,9 +1,11 @@
 #include "memory.h"
 #include "../ppu/ppu.h"
 #include "../apu/apu.h"
+#include "../debug/logger.h"
 #include <iostream>
 #include <iomanip>
 #include <ostream>
+#include <sstream>
 
 Memory::Memory() : m_cpu(nullptr), m_ppu(nullptr), m_apu(nullptr), m_input(nullptr) {
     m_wram.resize(128 * 1024, 0);
@@ -15,6 +17,22 @@ bool Memory::loadROM(const std::vector<uint8_t>& romData) {
     m_rom = romData;
     // Don't auto-detect mapping here - it will be set externally
     std::cout << "ROM loaded into memory: " << m_rom.size() << " bytes" << std::endl;
+    
+    // Debug: Check font data at offset 0x4D2C
+    if (m_rom.size() > 0x502C) {
+        std::cout << "Font data check at ROM offset 0x4D2C (first 16 bytes): ";
+        for (int i = 0; i < 16; i++) {
+            std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)m_rom[0x4D2C + i] << " ";
+        }
+        std::cout << std::dec << std::endl;
+        
+        std::cout << "Font data check at ROM offset 0x502C (char '0', first 16 bytes): ";
+        for (int i = 0; i < 16; i++) {
+            std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)m_rom[0x502C + i] << " ";
+        }
+        std::cout << std::dec << std::endl;
+    }
+    
     return true;
 }
 
@@ -40,6 +58,14 @@ uint32_t Memory::getHeaderPhysicalAddress() const {
 }
 
 uint8_t Memory::read8(uint32_t address) {
+    static bool debugged = false;
+    if (!debugged && address == 0xCD2C) {
+        std::ostringstream oss;
+        oss << "=== DEBUG read8(0xCD2C): m_rom.size()=" << m_rom.size() << " ===";
+        Logger::getInstance().logCPU(oss.str());
+        Logger::getInstance().flush();
+        debugged = true;
+    }
     // LoROM memory map for SNES
     // Banks $00-$7F: ROM at $8000-$FFFF (32KB per bank)
     // Banks $80-$FF: ROM mirror
@@ -122,6 +148,12 @@ uint16_t Memory::read16(uint32_t address) {
 }
 
 void Memory::write8(uint32_t address, uint8_t value) {
+    if ((address & 0xFFFF) == 0x420B) {
+        std::ostringstream oss;
+        oss << "=== write8($420B) called! address=0x" << std::hex << address << " value=0x" << (int)value << std::dec;
+        Logger::getInstance().logCPU(oss.str());
+        Logger::getInstance().flush();
+    }
     uint8_t bank = (address >> 16) & 0xFF;
     uint16_t offset = address & 0xFFFF;
     
@@ -175,11 +207,12 @@ void Memory::write8(uint32_t address, uint8_t value) {
         
         // Handle specific CPU I/O registers
         if (offset == 0x420B) { // MDMAEN - DMA Enable
+            Logger::getInstance().logCPU("=== DMA ENABLE! value=" + std::to_string(value) + " ===");
+            Logger::getInstance().flush();
             std::cout << "PPU: DMA Enable=$" << std::hex << (int)value << std::dec << std::endl;
-            // Enable DMA channels based on bit flags
+            // Trigger DMA channels based on bit flags
             for (int i = 0; i < 8; i++) {
                 if (value & (1 << i)) {
-                    m_dmaChannels[i].control |= 0x80; // Enable DMA
                     performDMA(i); // Execute DMA immediately
                 }
             }
@@ -259,21 +292,27 @@ void Memory::performDMA(uint8_t channel) {
     
     DMAChannel& dma = m_dmaChannels[channel];
     
-    // Check if DMA is enabled
-    if (!(dma.control & 0x80)) return;
+    // Get transfer direction: Bit 7 (0 = CPU to PPU, 1 = PPU to CPU)
+    bool toPPU = !(dma.control & 0x80);
     
-    // Get transfer direction (0 = CPU to PPU, 1 = PPU to CPU)
-    bool toPPU = !(dma.control & 0x01);
-    
-    // Get transfer mode
-    uint8_t mode = (dma.control >> 1) & 0x03;
+    // Get transfer mode (bits 2-0)
+    uint8_t mode = dma.control & 0x07;
     
     // Calculate source address
     uint32_t sourceAddr = (dma.sourceBank << 16) | dma.sourceAddr;
     
     // Calculate destination address (PPU register)
-    uint32_t destAddr = 0x2100 | dma.destAddr;
+    uint16_t destAddr = 0x2100 + dma.destAddr;
     
+    std::ostringstream oss;
+    oss << "DMA Channel " << (int)channel << ": " 
+        << (toPPU ? "CPU->PPU" : "PPU->CPU") 
+        << " Mode=" << (int)mode 
+        << " Size=" << dma.size 
+        << " Source=0x" << std::hex << sourceAddr 
+        << " Dest=0x" << destAddr << std::dec;
+    Logger::getInstance().logCPU(oss.str());
+    Logger::getInstance().flush();
     std::cout << "DMA Channel " << (int)channel << ": " 
               << (toPPU ? "CPU->PPU" : "PPU->CPU") 
               << " Mode=" << (int)mode 
@@ -287,19 +326,42 @@ void Memory::performDMA(uint8_t channel) {
             if (toPPU && dma.size > 0) {
                 uint8_t data = read8(sourceAddr);
                 if (m_ppu) {
-                    m_ppu->writeRegister(dma.destAddr, data);
+                    m_ppu->writeRegister(destAddr, data);
                 }
             }
             break;
             
-        case 1: // 2 registers, write twice
+        case 1: // 2 registers, write twice (alternates between destAddr and destAddr+1)
             if (toPPU && dma.size > 0) {
+                std::ostringstream dmaDebug;
+                dmaDebug << "DMA Mode 1: First 16 bytes: ";
                 for (uint16_t i = 0; i < dma.size; i++) {
                     uint8_t data = read8(sourceAddr + i);
+                    if (i < 16) {
+                        dmaDebug << std::hex << std::setw(2) << std::setfill('0') << (int)data << " ";
+                    }
                     if (m_ppu) {
-                        m_ppu->writeRegister(dma.destAddr, data);
+                        // Alternate between two registers
+                        uint16_t targetReg = destAddr + (i & 1);
+                        m_ppu->writeRegister(targetReg, data);
                     }
                 }
+                dmaDebug << std::dec;
+                Logger::getInstance().logCPU(dmaDebug.str());
+                
+                // Log bytes at offset 0x600 (where char '0' should be)
+                if (dma.size > 0x600) {
+                    std::ostringstream dmaDebug2;
+                    dmaDebug2 << "DMA Mode 1: Bytes at offset 0x600 (char '0'): ";
+                    for (uint16_t i = 0x600; i < 0x600 + 16 && i < dma.size; i++) {
+                        uint8_t data = read8(sourceAddr + i);
+                        dmaDebug2 << std::hex << std::setw(2) << std::setfill('0') << (int)data << " ";
+                    }
+                    dmaDebug2 << std::dec;
+                    Logger::getInstance().logCPU(dmaDebug2.str());
+                }
+                
+                Logger::getInstance().flush();
             }
             break;
             
@@ -310,7 +372,7 @@ void Memory::performDMA(uint8_t channel) {
                 for (uint16_t i = 0; i < dma.size; i++) {
                     uint8_t data = read8(sourceAddr + i);
                     if (m_ppu) {
-                        m_ppu->writeRegister(dma.destAddr, data);
+                        m_ppu->writeRegister(destAddr, data);
                     }
                 }
             }
@@ -407,11 +469,31 @@ uint32_t Memory::getROMAddress(uint32_t address, ROMMapping mapping) {
     uint8_t bank = (address >> 16) & 0xFF;
     uint32_t offset = address & 0x0000FFFF;
     
+    static bool debugged = false;
+    if (!debugged && address >= 0xCD2C && address <= 0xCD3C) {
+        std::ostringstream oss;
+        oss << "=== DEBUG getROMAddress(0x" << std::hex << address << "): bank=0x" << (int)bank 
+            << " offset=0x" << offset << " ===";
+        Logger::getInstance().logCPU(oss.str());
+        Logger::getInstance().flush();
+        debugged = true;
+    }
+    
     switch (mapping) {
         case ROMMapping::LoROM:
             // LoROM: Banks $00-$7F map to ROM at $8000-$FFFF
             if (bank >= 0x00 && bank <= 0x7F && offset >= 0x8000) {
-                return ((bank - 0x00) * 0x8000) + (offset - 0x8000);
+                uint32_t romAddr = ((bank - 0x00) * 0x8000) + (offset - 0x8000);
+                if (address >= 0xCD2C && address <= 0xCD3C) {
+                    std::ostringstream oss2;
+                    oss2 << "=== DEBUG LoROM: address=0x" << std::hex << address 
+                         << " -> romAddr=0x" << romAddr 
+                         << " m_rom.size()=" << std::dec << m_rom.size()
+                         << " m_rom[romAddr]=" << std::hex << (int)m_rom[romAddr] << " ===";
+                    Logger::getInstance().logCPU(oss2.str());
+                    Logger::getInstance().flush();
+                }
+                return romAddr;
             }
             // Banks $80-$FF mirror banks $00-$7F
             else if (bank >= 0x80 && bank <= 0xFF && offset >= 0x8000) {
