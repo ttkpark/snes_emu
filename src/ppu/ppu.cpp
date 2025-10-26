@@ -241,7 +241,7 @@ void PPU::step() {
             forceNmiCount++;
         }*/
         
-        if ((m_nmiEnabled || true) && m_cpu) {
+        if ((m_nmiEnabled) && m_cpu) {
             m_cpu->triggerNMI();
         }
     }
@@ -721,14 +721,20 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         }
             
         case 0x2118: { // VMDATAL - VRAM Data Low
-            writeVRAM(m_vramAddress, value);
-            incrementVRAMAddress();
+            writeVRAM(m_vramAddress * 2, value);  // Convert word address to byte address
+            // Increment only if VMAIN bit 7 is 0 (increment after low byte)
+            if ((m_vramReadBuffer & 0x80) == 0) {
+                incrementVRAMAddress();
+            }
             break;
         }
             
         case 0x2119: { // VMDATAH - VRAM Data High
-            writeVRAM(m_vramAddress + 1, value);
-            incrementVRAMAddress();
+            writeVRAM(m_vramAddress * 2 + 1, value);  // Convert word address to byte address
+            // Increment only if VMAIN bit 7 is 1 (increment after high byte)
+            if (m_vramReadBuffer & 0x80) {
+                incrementVRAMAddress();
+            }
             break;
         }
             
@@ -1097,11 +1103,10 @@ void PPU::loadROMData(const std::vector<uint8_t>& romData) {
     std::cout << "ROM size: " << romData.size() << " bytes" << std::endl;
     std::cout << "VRAM size: " << m_vram.size() << " bytes" << std::endl;
     
-    // Load first 64KB of ROM data into VRAM
-    size_t copySize = std::min(romData.size(), m_vram.size());
-    for (size_t i = 0; i < copySize; i++) {
-        m_vram[i] = romData[i];
-    }
+    // DO NOT copy ROM into VRAM automatically!
+    // VRAM should only be written by CPU through DMA or direct writes to $2118/2119
+    // The ROM data will be loaded by the game's initialization code via DMA
+    std::cout << "VRAM initialized to zero, waiting for CPU to load graphics via DMA" << std::endl;
     
     // Verify first few bytes
     std::cout << "First 16 VRAM bytes: ";
@@ -1139,6 +1144,5 @@ void PPU::loadROMData(const std::vector<uint8_t>& romData) {
         m_cgram[i * 2 + 1] = (color >> 8) & 0xFF;
     }
     
-    std::cout << "Loaded " << copySize << " bytes into VRAM" << std::endl;
     std::cout << "Initialized CGRAM with test colors" << std::endl;
 }
