@@ -61,7 +61,7 @@ int main(int argc, char* argv[]) {
     }
     
     // Load ROM
-    std::string romPath = "cputest-basic.sfc";
+    std::string romPath = "spctest.sfc";
     if (argc > 1) {
         romPath = argv[1];
         std::cout << "Loading ROM from command line: " << romPath << std::endl;
@@ -583,9 +583,9 @@ int main(int argc, char* argv[]) {
     bool running = true;
     uint64_t frameCount = 0;
     
-        // Test timer - run for 30 seconds for basic CPU tests
-        auto startTime = std::chrono::high_resolution_clock::now();
-        const auto testDuration = std::chrono::seconds(30);
+    // Test timer - run for 30 seconds for basic CPU tests
+    auto startTime = std::chrono::high_resolution_clock::now();
+    const auto testDuration = std::chrono::seconds(60);
     uint64_t cycleCount = 0;
     SDL_Event event;
     
@@ -593,10 +593,10 @@ int main(int argc, char* argv[]) {
     std::cout << "Controls: Arrow keys, Z/X/A/S for buttons" << std::endl;
     
     while (running) {
-        // Check if 1 second has passed
+        // Check timeout - 10 minutes for full test execution
         auto currentTime = std::chrono::high_resolution_clock::now();
-        if (currentTime - startTime >= testDuration) {
-            std::cout << "Test completed after 1 second." << std::endl;
+        if (currentTime - startTime >= std::chrono::minutes(10)) {
+            std::cout << "Test timeout after 10 minutes." << std::endl;
             break;
         }
         
@@ -604,58 +604,59 @@ int main(int argc, char* argv[]) {
         // Master Clock: 21.477272 MHz
         // CPU: Master ÷ 6 = 3.579545 MHz (6 cycles per master)
         // PPU: Master ÷ 4 = 5.369318 MHz (4 cycles per master) 
-        // APU: Master ÷ 8 = 2.684659 MHz (3 cycles per master)
+        // APU: Master ÷ 8 = 2.684659 MHz (8 cycles per master)
         
-        static int masterCycles = 0;
-        static int frameCycles = 0;
-        const int CYCLES_PER_FRAME = 1364 * 262; // ~357,368 master cycles per frame
+        // Use a more accurate synchronization approach
+        // Track counters for each component independently
+        static int ppuCounter = 0;  // PPU runs every 4 master cycles
+        static int cpuCounter = 0;   // CPU runs every 6 master cycles
+        static int apuCounter = 0;   // APU runs every 8 master cycles
         
         // Run one master clock cycle
-        if(++masterCycles >= 24){
-            masterCycles = 0;
-        }
-        frameCycles++;
+        ppuCounter++;
+        cpuCounter++;
+        apuCounter++;
         
-        // CPU runs every 6 master cycles (3.58MHz)
-        if (masterCycles == 0 || masterCycles == 6 || masterCycles == 12 || masterCycles == 18) {
-            cpu.step();
-            cycleCount++;
-            
-            // Print vectors every 100000 cycles (reduced for testing)
-            if (cycleCount % 100000 == 0) {
-                std::vector<uint16_t> runtimeVectors(6);
-                
-                // Determine vector base address based on CPU mode
-                uint16_t vectorBaseAddr;
-                if (cpu.getEmulationMode()) {
-                    vectorBaseAddr = 0xFFF4;  // Emulation mode vectors
-                } else {
-                    vectorBaseAddr = 0xFFE4;  // Native mode vectors
-                }
-                
-                for (int i = 0; i < 6; i++) {
-                    runtimeVectors[i] = memory.read16(vectorBaseAddr + i*2);
-                }
-                printVectorsHexViewer(runtimeVectors, "=== CYCLE " + std::to_string(cycleCount) + " - VECTORS ===", cpu.getEmulationMode());
-            }
-        }
-        
-        // PPU runs every 4 master cycles (5.37MHz)
-        if (masterCycles == 0 || masterCycles == 4 || masterCycles == 8 || masterCycles == 12 || masterCycles == 16 || masterCycles == 20) {
+        // PPU runs every 4 master cycles (5.37MHz) - Run PPU first to ensure scanline is updated
+        // This ensures PPU progresses even when CPU is stuck in VBlank wait loop
+        if (ppuCounter >= 4) {
+            ppuCounter = 0;
             ppu.step();
         }
         
+        // CPU runs every 6 master cycles (3.58MHz)
+        if (cpuCounter >= 6) {
+            cpuCounter = 0;
+            cpu.step();
+            if(cpu.m_quitEmulation){
+                running = false;
+                break;
+            }
+            cycleCount++;
+        }
+        
         // APU runs every 8 master cycles (2.68MHz)
-        if (masterCycles == 0 || masterCycles == 8 || masterCycles == 16 || masterCycles == 24) {
+        if (apuCounter >= 8) {
+            apuCounter = 0;
             apu.step();
         }
+        
+        // Generate audio more frequently (every ~341 CPU cycles = ~32kHz sampling rate)
+        // At 21.477272 MHz master clock, 32kHz = ~671 cycles per sample
+        // Generate audio every ~671 cycles to maintain 32kHz
+        static int audioCounter = 0;
+        audioCounter++;
+        if (audioCounter >= 671) {
+            apu.generateAudio();
+            audioCounter = 0;
+        }
+        
         if(ppu.isFrameReady()){
             
             ppu.renderFrame();
             ppu.clearFrameReady();
 
             frameCount++;
-            frameCycles = 0;
             
             if (frameCount % 60 == 0) {
                 std::cout << "Frame: " << frameCount << ", CPU Cycles: " << cpu.getCycles() << std::endl;
@@ -667,15 +668,13 @@ int main(int argc, char* argv[]) {
                 }
                 input.update();
             }
-            // Update DSP (only after boot)
-            // Always generate audio (test tone will play if no channels enabled)
-            apu.generateAudio();
         }
         
     }
     
     std::cout << "Emulation finished." << std::endl;
-    system("pause");
+    std::cout << "Total CPU instructions executed: " << cycleCount << std::endl;
+    //system("pause");
     // Cleanup
     apu.cleanup();
     ppu.cleanup();

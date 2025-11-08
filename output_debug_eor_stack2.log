@@ -1,0 +1,151 @@
+SNES Emulator - Complete SDL2 Version
+Loading ROM from command line: cputest-basic.sfc
+ROM loaded: 262144 bytes
+Initializing components...
+APU: IPL Boot ROM loaded at 0xffc0 (stub mode - handshake in I/O)
+Connecting components...
+Loading ROM into memory...
+ROM loaded into memory: 262144 bytes
+Font data check at ROM offset 0x4D2C (first 16 bytes): 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+Font data check at ROM offset 0x502C (char '0', first 16 bytes): 7c 00 c6 00 ce 00 de 00 f6 00 e6 00 7c 00 00 00 
+ROM loaded into memory successfully.
+
+=== SNES ROM Mapping Analysis ===
+ROM Size: 262144 bytes
+
+=== ROM Header Analysis ===
+
+=== LoROM Header Analysis ===
+  LoROM Header at 0x7FC0
+  ROM Type (0x7FD5): 0x30 (LoROM)
+  -> LoROM mapping detected
+  ROM Size      : 256KB
+  ROM File Size : 256KB
+
+=== HiROM Header Analysis ===
+  HiROM Header at 0xFFC0
+  ROM Type (0xFFD5): 0x0 (Not HiROM)
+
+=== ExHiROM Header Analysis ===
+  ROM too small for ExHiROM header
+  ROM Size: 262144 bytes
+  Headered ROM: No
+
+=== Checksum Verification ===
+  LoROM Checksum: INVALID
+  All checksums invalid, using header-based detection
+
+=== Final Mapping Determination ===
+  -> LoROM mapping detected
+ROM Mapping set to: LoROM
+
+=== CPU Vector Reading Analysis ===
+ROM Name: 65C816 TEST          
+Detected Mapping: LoROM
+Vector Base: 0x7fe0
+
+SNES INTERRUPT VECTORS (native):
+  COP  :  0xFFE4 -> 0x1004
+  BRK  :  0xFFE6 -> 0x1000
+(Abort):  0xFFE8 -> 0x0
+  NMI  :  0xFFEA -> 0x0
+ (N/A) :  0xFFEC -> 0x0
+  IRQ  :  0xFFEE -> 0x0
+
+SNES INTERRUPT VECTORS (6502 emulation):
+ COP   :  0xFFF4 -> 0x100c
+ (N/A) :  0xFFF6 -> 0x0
+(Abort):  0xFFF8 -> 0x0
+ NMI   :  0xFFFA -> 0x0
+ RST   :  0xFFFC -> 0x8000
+ IRQBRK:  0xFFFE -> 0x1008
+m_headerPhysicalAddress : 7fe0 = 7fe0
+
+Vector Address Contents:
+  Using Emulation Mode vectors (0xFFF4-0xFFFF)
+  Vector 0: 0x100c -> INVALID ADDRESS
+  Vector 1: 0x0 -> INVALID ADDRESS
+  Vector 2: 0x0 -> INVALID ADDRESS
+  Vector 3: 0x0 -> INVALID ADDRESS
+  Vector 4: 0x8000 -> ROM[0x0] = 0x18 (Unknown)
+  Vector 5: 0x1008 -> INVALID ADDRESS
+
+Raw Vector Data:
+  (0xffe0): 0x0  (0xffe1): 0x0
+  (0xffe2): 0x0  (0xffe3): 0x0
+  (0xffe4): 0x4  (0xffe5): 0x10
+  (0xffe6): 0x0  (0xffe7): 0x10
+  (0xffe8): 0x0  (0xffe9): 0x0
+  (0xffea): 0x0  (0xffeb): 0x0
+  (0xffec): 0x0  (0xffed): 0x0
+  (0xffee): 0x0  (0xffef): 0x0
+=== End Vector Analysis ===
+
+About to call ppu.loadROMData()...
+ppu.loadROMData() completed.
+PPU: Video initialized - 256x224
+APU: Audio initialized - 32000Hz, 2 channels, 1024 samples buffer
+APU: Audio playback started (device unpaused)
+CPU Reset: Vector=0x8000, PC=0x8000, PBR=0x0
+Initializing PPU registers...
+APU: audioCallback() called! Requested 2048 samples, buffer size 2048
+PPU: BG1HOFS=$0, ScrollX=0x0
+PPU: VMAIN=$0 - Inc size=1, Inc after low byte
+PPU: Unimplemented write to $211b = $0
+PPU: Unimplemented write to $211c = $0
+PPU: Unimplemented write to $211d = $0
+PPU: Unimplemented write to $211e = $0
+PPU: Unimplemented write to $211f = $0
+PPU: Unimplemented write to $2120 = $0
+PPU: TM (Main Screen)=$0
+PPU: Unimplemented write to $2134 = $0
+PPU: Unimplemented write to $2135 = $0
+PPU: Unimplemented write to $2136 = $0
+PPU: Unimplemented write to $2137 = $0
+PPU: Unimplemented write to $2138 = $0
+PPU: Unimplemented write to $2139 = $0
+PPU: Unimplemented write to $213a = $0
+PPU: Unimplemented write to $213b = $0
+PPU: Unimplemented write to $213c = $0
+PPU: Unimplemented write to $213d = $0
+PPU: Unimplemented write to $213e = $0
+PPU: Unimplemented write to $213f = $0
+PPU: Unimplemented write to $2140 = $0
+PPU: Unimplemented write to $2141 = $0
+PPU registers initialized.
+
+=== ORIGINAL ROM HEADER VECTORS ===
+Address: 0000fff4 0000fff6 0000fff8 0000fffa 0000fffc 0000fffe 
+Data:    00001004 00001000 00000000 00000000 00000000 00000000 
+
+=== INITIALIZATION COMPLETE - VECTORS ===
+Address: 0000fff4 0000fff6 0000fff8 0000fffa 0000fffc 0000fffe 
+Data:    0000100c 00000000 00000000 00000000 00008000 00001008 
+
+=== VECTOR COMPARISON ===
+Vector Comparison:
+Index | Original | Current  | Status
+------|----------|----------|--------
+  0   | 0x001004 | 0x00100c | DIFF
+  1   | 0x001000 | 0x000000 | DIFF
+  2   | 0x000000 | 0x000000 | SAME
+  3   | 0x000000 | 0x000000 | SAME
+  4   | 0x000000 | 0x008000 | DIFF
+  5   | 0x000000 | 0x001008 | DIFF
+Starting emulation loop...
+Controls: Arrow keys, Z/X/A/S for buttons
+APU: step() called for the first time
+APU: PC=0xffc0, bootComplete=0
+[Cyc:1] SPC700: MOV $f4, #$aa
+[Cyc:2] SPC700: MOV $f5, #$bb
+APU: Boot completed after 2 steps - Ready signature detected (0xBBAA)
+PPU: BG1HOFS=$0, ScrollX=0x0
+PPU: BG1HOFS=$0, ScrollX=0x0
+PPU: VMAIN=$80 - Inc size=1, Inc after high byte
+PPU: TM (Main Screen)=$1
+[Cyc:51159] DEX: X=ffff, Zero=false, Negative=true
+renderFrame() called, frame 0
+APU: generateAudio() called for first time
+[Cyc:110863] DEX: X=0, Zero=true, Negative=false
+[Cyc:110997] DEX: X=1, Zero=false, Negative=false
+renderFrame() called, frame 1

@@ -147,7 +147,25 @@ uint16_t Memory::read16(uint32_t address) {
     return low | (high << 8);
 }
 
+uint32_t Memory::read24(uint32_t address) {
+    uint8_t low = read8(address);
+    uint8_t mid = read8(address + 1);
+    uint8_t high = read8(address + 2);
+    return low | (mid << 8) | (high << 16);
+}
+
 void Memory::write8(uint32_t address, uint8_t value) {
+    // DEBUG: Track writes to $7e5000-$7e5002 for test01bb
+    if (address >= 0x7e5000 && address <= 0x7e5002) {
+        std::ostringstream oss;
+        oss << "[MEM WRITE] address=$" << std::hex << address 
+            << " value=$" << (int)value 
+            << " bank=$" << ((address >> 16) & 0xFF)
+            << " offset=$" << (address & 0xFFFF);
+        Logger::getInstance().logCPU(oss.str());
+        Logger::getInstance().flush();
+    }
+    
     if ((address & 0xFFFF) == 0x420B) {
         std::ostringstream oss;
         oss << "=== write8($420B) called! address=0x" << std::hex << address << " value=0x" << (int)value << std::dec;
@@ -156,6 +174,25 @@ void Memory::write8(uint32_t address, uint8_t value) {
     }
     uint8_t bank = (address >> 16) & 0xFF;
     uint16_t offset = address & 0xFFFF;
+    
+    // Special debug: track writes that affect zero-page stack bytes $0001ED-$0001EF
+    {
+        uint8_t dbgBank = (address >> 16) & 0xFF;
+        uint16_t dbgOff  = address & 0xFFFF;
+        bool hitsZeroPageMirror = ((dbgBank < 0x40) || (dbgBank >= 0x80 && dbgBank < 0xC0)) && (dbgOff >= 0x01ED && dbgOff <= 0x01EF);
+        bool hitsWramDirect     = (dbgBank == 0x7E || dbgBank == 0x7F) && ((address & 0x1FFFF) >= 0x01ED) && ((address & 0x1FFFF) <= 0x01EF);
+        if (hitsZeroPageMirror || hitsWramDirect) {
+            uint8_t oldVal = read8(address);
+            std::ostringstream oss;
+            oss << "[WRITE MON] addr=0x" << std::hex << address
+                << " bank=0x" << (int)dbgBank
+                << " off=0x" << dbgOff
+                << " old=0x" << (int)oldVal
+                << " new=0x" << (int)value;
+            Logger::getInstance().logCPU(oss.str());
+            Logger::getInstance().flush();
+        }
+    }
     
     // Work RAM ($7E and $7F banks)
     if (bank == 0x7E || bank == 0x7F) {
@@ -183,11 +220,11 @@ void Memory::write8(uint32_t address, uint8_t value) {
     
     // I/O registers ($2100-$21FF in banks $00-$3F and $80-$BF)
     if (offset >= 0x2100 && offset < 0x2200 && ((bank < 0x40) || (bank >= 0x80 && bank < 0xC0))) {
-        // Log PPU register writes
+        // Log PPU register writes (especially VRAM writes)
         static int ppuWriteCount = 0;
-        if (ppuWriteCount < 50) {
-            std::cout << "Memory: PPU Write [$" << std::hex << offset << "] = $" << (int)value << std::dec << std::endl;
-            ppuWriteCount++;
+        if (ppuWriteCount < 50 || offset == 0x2118 || offset == 0x2119) {
+            // std::cout << "Memory: PPU Write [$" << std::hex << offset << "] = $" << (int)value << std::dec << std::endl;
+            if (ppuWriteCount < 50) ppuWriteCount++;
         }
         // PPU registers - forward to PPU
         if (m_ppu) {
@@ -201,7 +238,7 @@ void Memory::write8(uint32_t address, uint8_t value) {
         // Log CPU I/O register writes
         static int cpuIoWriteCount = 0;
         if (cpuIoWriteCount < 50) {
-            std::cout << "Memory: CPU I/O Write [$" << std::hex << offset << "] = $" << (int)value << std::dec << std::endl;
+            // std::cout << "Memory: CPU I/O Write [$" << std::hex << offset << "] = $" << (int)value << std::dec << std::endl;
             cpuIoWriteCount++;
         }
         
@@ -209,7 +246,7 @@ void Memory::write8(uint32_t address, uint8_t value) {
         if (offset == 0x420B) { // MDMAEN - DMA Enable
             Logger::getInstance().logCPU("=== DMA ENABLE! value=" + std::to_string(value) + " ===");
             Logger::getInstance().flush();
-            std::cout << "PPU: DMA Enable=$" << std::hex << (int)value << std::dec << std::endl;
+            // std::cout << "PPU: DMA Enable=$" << std::hex << (int)value << std::dec << std::endl;
             // Trigger DMA channels based on bit flags
             for (int i = 0; i < 8; i++) {
                 if (value & (1 << i)) {
@@ -217,7 +254,7 @@ void Memory::write8(uint32_t address, uint8_t value) {
                 }
             }
         } else if (offset == 0x420C) { // HDMAEN - HDMA Enable
-            std::cout << "PPU: HDMA Enable=$" << std::hex << (int)value << std::dec << std::endl;
+            // std::cout << "PPU: HDMA Enable=$" << std::hex << (int)value << std::dec << std::endl;
             // HDMA not implemented yet
         } else {
             // Forward to PPU (for NMI control)
@@ -233,7 +270,7 @@ void Memory::write8(uint32_t address, uint8_t value) {
         // Log DMA register writes
         static int dmaRegWriteCount = 0;
         if (dmaRegWriteCount < 50) {
-            std::cout << "Memory: DMA Register Write [$" << std::hex << offset << "] = $" << (int)value << std::dec << std::endl;
+            // std::cout << "Memory: DMA Register Write [$" << std::hex << offset << "] = $" << (int)value << std::dec << std::endl;
             dmaRegWriteCount++;
         }
         
@@ -313,12 +350,12 @@ void Memory::performDMA(uint8_t channel) {
         << " Dest=0x" << destAddr << std::dec;
     Logger::getInstance().logCPU(oss.str());
     Logger::getInstance().flush();
-    std::cout << "DMA Channel " << (int)channel << ": " 
-              << (toPPU ? "CPU->PPU" : "PPU->CPU") 
-              << " Mode=" << (int)mode 
-              << " Size=" << dma.size 
-              << " Source=0x" << std::hex << sourceAddr 
-              << " Dest=0x" << destAddr << std::dec << std::endl;
+    // std::cout << "DMA Channel " << (int)channel << ": " 
+    //           << (toPPU ? "CPU->PPU" : "PPU->CPU") 
+    //           << " Mode=" << (int)mode 
+    //           << " Size=" << dma.size 
+    //           << " Source=0x" << std::hex << sourceAddr 
+    //           << " Dest=0x" << destAddr << std::dec << std::endl;
     
     // Perform transfer based on mode
     switch (mode) {

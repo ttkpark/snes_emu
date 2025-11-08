@@ -1,12 +1,11 @@
 #include "ppu.h"
 #include "../cpu/cpu.h"
 #include "../debug/logger.h"
-#include <cstring>
+#include <cstdio>
 #include <iostream>
 #include <sstream>
 #include <iomanip>
 #include <set>
-#include <fstream>
 #ifdef USE_SDL
 #include <SDL.h>
 #endif
@@ -18,6 +17,11 @@ PPU::PPU()
     , m_forcedBlank(false)
     , m_nmiEnabled(false)
     , m_nmiFlag(false)
+    , m_latchedH(0)
+    , m_latchedV(0)
+    , m_hvLatchRead(false)
+    , m_hvLatchHRead(false)
+    , m_hvLatchVRead(false)
     , m_bg1TileAddr(0)
     , m_bg1MapAddr(0)
     , m_bg2TileAddr(0)
@@ -41,6 +45,19 @@ PPU::PPU()
     , m_mainScreenDesignation(0)
     , m_subScreenDesignation(0)
     , m_colorMath(0)
+    , m_w12sel(0)
+    , m_w34sel(0)
+    , m_wobjsel(0)
+    , m_wh0(0)
+    , m_wh1(0)
+    , m_wh2(0)
+    , m_wh3(0)
+    , m_wbglog(0)
+    , m_wobjlog(0)
+    , m_tmw(0)
+    , m_tsw(0)
+    , m_cgws(0)
+    , m_cgadsub(0)
     , m_objSize(0)
     , m_vramAddress(0)
     , m_vramIncrement(0)
@@ -63,6 +80,41 @@ PPU::PPU()
     m_cgram.resize(512, 0);
     m_oam.resize(544, 0);
     m_framebuffer = new uint32_t[SCREEN_WIDTH * SCREEN_HEIGHT];
+    
+    // Initialize BG address arrays
+    m_bgMapAddr[0] = 0;  // BG1
+    m_bgMapAddr[1] = 0;  // BG2
+    m_bgMapAddr[2] = 0;  // BG3
+    m_bgMapAddr[3] = 0;  // BG4
+    
+    m_bgTileAddr[0] = 0; // BG1
+    m_bgTileAddr[1] = 0; // BG2
+    m_bgTileAddr[2] = 0; // BG3
+    m_bgTileAddr[3] = 0; // BG4
+    
+    // Initialize BG tilemap sizes (default: 32x32)
+    m_bgMapSize[0] = false; // BG1
+    m_bgMapSize[1] = false; // BG2
+    m_bgMapSize[2] = false; // BG3
+    m_bgMapSize[3] = false; // BG4
+    
+    // Initialize Mosaic settings
+    m_mosaicSize = 0;
+    m_mosaicEnabled[0] = false; // BG1
+    m_mosaicEnabled[1] = false; // BG2
+    m_mosaicEnabled[2] = false; // BG3
+    m_mosaicEnabled[3] = false; // BG4
+    
+    // Initialize BG priority (Mode 0 defaults)
+    // Mode 0: BG1=3/0, BG2=2/0, BG3=1/0, BG4=0/0 (high priority / low priority)
+    m_bgPriority[0][0] = 0;  // BG1 low priority
+    m_bgPriority[0][1] = 3;  // BG1 high priority
+    m_bgPriority[1][0] = 0;  // BG2 low priority  
+    m_bgPriority[1][1] = 2;  // BG2 high priority
+    m_bgPriority[2][0] = 0;  // BG3 low priority
+    m_bgPriority[2][1] = 1;  // BG3 high priority
+    m_bgPriority[3][0] = 0;  // BG4 low priority
+    m_bgPriority[3][1] = 0;  // BG4 high priority
     
     // Set initial background color in CGRAM
     m_cgram[0] = 0x1F;
@@ -188,9 +240,21 @@ void PPU::step() {
     // Log PPU events
     static int frameCount = 0;
     static int logCount = 0;
+    static int stepCount = 0;
     
     // Increment dot counter (341 dots per scanline)
     m_dot++;
+    
+    // Log scanline progress every 1000 steps for debugging
+    if (stepCount++ % 1000 == 0 && logCount < 1000) {
+        std::ostringstream oss;
+        oss << "[PPU-STEP] Step=" << std::dec << stepCount
+            << " Dot=" << m_dot
+            << " Scanline=" << m_scanline
+            << " CPU_Cycles=" << (m_cpu ? m_cpu->getCycles() : 0);
+        Logger::getInstance().logPPU(oss.str());
+        logCount++;
+    }
     
     if (m_dot >= 341) {
         m_dot = 0;
@@ -218,19 +282,19 @@ void PPU::step() {
     
     // V-Blank start at scanline 225 (0xE1)
     if (m_scanline == 225) {
-        m_nmiFlag = true;  // Set NMI flag
+        m_nmiFlag = true;  // Set NMI flag when VBlank starts
         
-        // Log V-Blank start
-        if (logCount < 500) {
-            std::ostringstream oss;
-            oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
-                << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
-                << "Scanline:" << std::setw(3) << m_scanline << " | "
-                << "Event: V-Blank Start | "
-                << "NMI:" << (m_nmiEnabled ? "Enabled" : "Disabled");
-            Logger::getInstance().logPPU(oss.str());
-            logCount++;
-        }
+        // V-Blank start logging disabled to reduce log spam
+        // if (logCount < 500) {
+        //     std::ostringstream oss;
+        //     oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+        //         << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+        //         << "Scanline:" << std::setw(3) << m_scanline << " | "
+        //         << "Event: V-Blank Start | "
+        //         << "NMI:" << (m_nmiEnabled ? "Enabled" : "Disabled");
+        //     Logger::getInstance().logPPU(oss.str());
+        //     logCount++;
+        // }
         
         // Trigger NMI if enabled
         /*static int forceNmiCount = 0;
@@ -246,14 +310,18 @@ void PPU::step() {
         }
     }
     
+    // Note: Do NOT keep m_nmiFlag set during entire VBlank period
+    // RDNMI readRegister() will check current scanline directly
+    
     }
     
     // V-Blank period (scanlines 225-261)
+    // SNES has 262 scanlines total: 224 visible + 1 pre-render + 37 VBlank
     if (m_scanline >= 262) {
         m_scanline = 0;
         m_dot = 0;
         m_frameReady = true;
-        m_nmiFlag = false;  // Clear NMI flag at frame start
+        m_nmiFlag = false;  // Clear NMI flag at frame start (VBlank ends)
         frameCount++;
         
         // Log frame completion
@@ -271,13 +339,19 @@ void PPU::step() {
 }
 
 void PPU::renderScanline() {
+#ifdef DEBUG_PPU_RENDER
     // Debug: Print when this is called
     static int callCount = 0;
     if (callCount < 5) {
         std::cout << "renderScanline() called for scanline " << m_scanline << std::endl;
         callCount++;
     }
+#endif
     
+    // Safety: if display is enabled but brightness is 0, bump to visible level
+    if (!m_forcedBlank && m_brightness == 0) {
+        m_brightness = 15;
+    }
     // Check if forced blank is enabled
     if (m_forcedBlank) {
         // During forced blank, keep previous frame data instead of filling with black
@@ -289,164 +363,389 @@ void PPU::renderScanline() {
     
     // Render actual SNES graphics
     for (int x = 0; x < SCREEN_WIDTH; x++) {
-        uint32_t pixelColor = 0xFF000000; // Default to black
+        uint32_t mainColor = 0xFF000000; // Default to black
+        uint32_t subColor = 0xFF000000;
         
-        // Render background layers
+        // Render background layers for Main Screen
         if (m_bgMode == 0) {
             // Mode 0: 4 layers of 2bpp tiles
-            pixelColor = renderBackgroundMode0(x);
+            mainColor = renderBackgroundMode0(x);
         } else if (m_bgMode == 1) {
             // Mode 1: BG1/BG2 4bpp, BG3 2bpp
-            pixelColor = renderBackgroundMode1(x);
+            mainColor = renderBackgroundMode1(x);
         } else {
             // Other modes: simple test pattern
-            pixelColor = renderTestPattern(x);
+            mainColor = renderTestPattern(x);
         }
         
-        // Debug: Print first few pixels
-        /*if (x < 5 && m_scanline == 0) {
-            std::cout << "    renderScanline: x=" << x << " bgMode=" << (int)m_bgMode << " pixelColor=0x" << std::hex << pixelColor << std::dec << std::endl;
-        }*/
+        // Render Sub Screen if enabled
+        if (m_subScreenDesignation != 0) {
+            subColor = renderSubScreen(x);
+        }
+        
+        // Render sprites and composite with background
+        PixelInfo spritePixel = renderSpritePixel(x, m_scanline);
+        
+        // Composite sprites with background based on priority
+        uint32_t bgColor = mainColor;
+        if (spritePixel.color != 0) {
+            // Check sprite priority against background
+            // In Mode 0, sprites have priority based on their attributes
+            // For simplicity, assume sprite priority is higher than most BGs
+            // TODO: Implement proper priority comparison based on sprite attributes
+            bool spriteBehind = false;
+            // Simple priority check: if BG has very high priority (3), sprite might be behind
+            // This is a simplified version - full implementation needs OAM extended data
+            if (mainColor != 0 && spritePixel.priority <= 1) {
+                // Check if any BG has priority >= 3
+                // For now, always show sprite if it exists and is not transparent
+                spriteBehind = false;
+            }
+            
+            if (!spriteBehind) {
+                bgColor = spritePixel.color;
+            }
+        }
+        
+        // Apply window masking
+        // Check if this pixel should be masked by window
+        bool windowMasked = false;
+        // Window masking is complex - simplified version for now
+        // Full implementation needs to check window settings for each layer
+        
+        // Apply Color Math if enabled
+        uint32_t finalColor = bgColor;
+        if ((m_cgws & 0x20) != 0 && m_subScreenDesignation != 0) {
+            // Color Math enabled
+            finalColor = applyColorMath(bgColor, subColor);
+        } else {
+            finalColor = bgColor;
+        }
+        
+#ifdef DEBUG_PPU_RENDER
+        if (m_scanline == 0 && x == 0) {
+            std::ostringstream oss;
+            oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+                << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                << "Scanline:" << std::setw(3) << m_scanline << " | "
+                << "Mode: " << (int)m_bgMode << std::dec << std::endl;
+            Logger::getInstance().logPPU(oss.str());
+        }
+#endif
         
         // Apply brightness
         if (m_brightness < 15) {
-            uint8_t r = (pixelColor & 0xFF);
-            uint8_t g = ((pixelColor >> 8) & 0xFF);
-            uint8_t b = ((pixelColor >> 16) & 0xFF);
+            uint8_t r = (finalColor & 0xFF);
+            uint8_t g = ((finalColor >> 8) & 0xFF);
+            uint8_t b = ((finalColor >> 16) & 0xFF);
             
             r = (r * m_brightness) / 15;
             g = (g * m_brightness) / 15;
             b = (b * m_brightness) / 15;
             
-            pixelColor = (0xFF << 24) | (b << 16) | (g << 8) | r;
+            finalColor = (0xFF << 24) | (b << 16) | (g << 8) | r;
         }
         
-        m_framebuffer[m_scanline * SCREEN_WIDTH + x] = pixelColor;
+        m_framebuffer[m_scanline * SCREEN_WIDTH + x] = finalColor;
     }
     
+#ifdef DEBUG_PPU_RENDER
     // Debug: Print first few pixels of first scanline
     if (m_scanline == 0 && callCount <= 5) {
-        std::cout << "  First 5 pixels: ";
+        std::ostringstream oss;
         for (int i = 0; i < 5; i++) {
-            std::cout << std::hex << "0x" << m_framebuffer[i] << " ";
+            oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+            << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+            << "  First 5 pixels: " << std::hex << "0x" << m_framebuffer[m_scanline * SCREEN_WIDTH + i] << " ";
         }
-        std::cout << std::dec << std::endl;
+        oss << std::dec << std::endl;   
+        Logger::getInstance().logPPU(oss.str());
+        Logger::getInstance().flush();  // Flush at frame end
     }
+#endif
     
-    #ifdef USE_SDL
-    Uint32* pixels = NULL;
-    int pitch = SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(Uint32); 
-    
-    if (SDL_LockTexture(m_texture, NULL, (void**)&pixels, &pitch) == 0) {
-    
-        memcpy(pixels, m_framebuffer, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(Uint32));
-    
-        SDL_UnlockTexture(m_texture);
-        //std::cout << " buffer written to texture" << std::endl;
-    }
-    else {
-        //std::cout << " failed to lock texture" << std::endl;
-    }
-
-    SDL_RenderClear(m_renderer); 
-    SDL_RenderCopy(m_renderer, m_texture, NULL, NULL); // 전체 화면에 텍스처를 그림
-    SDL_RenderPresent(m_renderer);
-    #endif
 }
 
 void PPU::renderBackground() {
     // TODO: Implement proper background rendering
     // For now, just fill with background color
 }
+// Member variables defined in PPU class:
+// m_bgMapAddr[4]: Tilemap start addresses for BG1, BG2, BG3, BG4
+// m_bgTileAddr[4]: Tile data start addresses for BG1, BG2, BG3, BG4
+// m_bgPriority[4][2]: Two priority levels for each background (e.g., BG1_PRIO_A, BG1_PRIO_B)
+// m_cgram: CGRAM (Palette RAM)
 
-uint32_t PPU::renderBackgroundMode0(int x) {
-    // Debug: Print when function is called
-    if (x < 5 && m_scanline == 0) {
-        std::cout << "    renderBackgroundMode0() called for x=" << x << std::endl;
+// Internal utility function to calculate pixel information for BG1~BG4:
+// This function uses corrected 2bpp tile decoding logic.
+// tileX, tileY, pixelX, pixelY are already scrolled coordinates from the caller
+PixelInfo PPU::renderBGx(int bgIndex, int tileX, int tileY, int pixelX, int pixelY) {
+    const int TILE_SIZE_BYTES = 16;
+    
+    // Get scroll values for fine scrolling calculation
+    int scrollX, scrollY;
+    switch (bgIndex) {
+        case 0: scrollX = m_bg1ScrollX; scrollY = m_bg1ScrollY; break;
+        case 1: scrollX = m_bg2ScrollX; scrollY = m_bg2ScrollY; break;
+        case 2: scrollX = m_bg3ScrollX; scrollY = m_bg3ScrollY; break;
+        case 3: scrollX = m_bg4ScrollX; scrollY = m_bg4ScrollY; break;
+        default: scrollX = 0; scrollY = 0; break;
     }
     
-    // Mode 0: 4 layers of 2bpp tiles
-    // Render actual SNES background from VRAM
+    // Handle tilemap wrapping (32x32 or 64x64 tilemap)
+    int tilemapWidth = m_bgMapSize[bgIndex] ? 64 : 32;
+    int wrappedTileX = tileX & (tilemapWidth - 1);  // Wrap to tilemap width
+    int wrappedTileY = tileY & (tilemapWidth - 1);  // Wrap to tilemap height
     
-    // Calculate tile coordinates (8x8 tiles)
-    int tileX = x / 8;
-    int tileY = m_scanline / 8;
+    // 1. Calculate tilemap address (32x32 or 64x64 tilemap)
+    uint16_t mapAddr = m_bgMapAddr[bgIndex] + (wrappedTileY * tilemapWidth + wrappedTileX) * 2;
     
-    // Calculate pixel within tile
-    int pixelX = x % 8;
-    int pixelY = m_scanline % 8;
-    
-    // Get tile data from VRAM
-    // BG1 tile map starts at m_bg1MapAddr
-    uint16_t mapAddr = m_bg1MapAddr + (tileY * 32 + tileX) * 2;
-    
-    // Read tile map entry (16-bit)
-    uint16_t tileEntry = 0;
-    if (mapAddr < m_vram.size() - 1) {
-        tileEntry = m_vram[mapAddr] | (m_vram[mapAddr + 1] << 8);
+#ifdef DEBUG_PPU_RENDER
+    static bool isPixelTransparent[4] = {false, false, false, false};
+    if(m_scanline == 0 && tileX == 0 && pixelX == 0) {
+        if(isPixelTransparent[bgIndex] == false){
+            std::ostringstream oss;
+            oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+                << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                << "BGIdx:" << bgIndex << ", No Valid Pixel Found at last BG "<< std::endl;
+            Logger::getInstance().logPPU(oss.str());
+        }
+        isPixelTransparent[bgIndex] = false;
     }
+#endif
+    // VRAM boundary check
+    if (mapAddr + 1 >= m_vram.size()) return {0, 0};
     
-    // Extract tile number and attributes
+    // 2. Read tilemap entry
+    uint16_t tileEntry = m_vram[mapAddr] | (m_vram[mapAddr + 1] << 8);
+    
+    // 3. Extract attributes
     uint16_t tileNumber = tileEntry & 0x03FF;
-    uint8_t palette = (tileEntry >> 10) & 0x07;
+    uint8_t palette = (tileEntry >> 10) & (bgIndex < 2 ? 0x07 : 0x01); 
     bool hFlip = (tileEntry >> 14) & 1;
     bool vFlip = (tileEntry >> 15) & 1;
+    uint8_t priorityGroup = (tileEntry >> 13) & 1; 
     
-    // Apply flipping
-    if (hFlip) pixelX = 7 - pixelX;
-    if (vFlip) pixelY = 7 - pixelY;
+    // Apply fine scrolling to pixel coordinates
+    int fineScrollX = scrollX & 7;
+    int fineScrollY = scrollY & 7;
     
-    // Get tile data address (2bpp = 32 bytes per tile)
-    uint16_t tileAddr = m_bg1TileAddr + tileNumber * 32;
+    int scrolledPixelX = pixelX - fineScrollX;
+    int scrolledPixelY = pixelY - fineScrollY;
     
-    // Read tile data
-    uint8_t tileData[32];
-    for (int i = 0; i < 32; i++) {
-        if (tileAddr + i < m_vram.size()) {
-            tileData[i] = m_vram[tileAddr + i];
-        } else {
-            tileData[i] = 0;
-        }
+    // Handle pixel wrapping within tile
+    if (scrolledPixelX < 0) scrolledPixelX += 8;
+    if (scrolledPixelY < 0) scrolledPixelY += 8;
+    
+    // 4. Apply flip
+    int finalX = hFlip ? (7 - scrolledPixelX) : scrolledPixelX;
+    int finalY = vFlip ? (7 - scrolledPixelY) : scrolledPixelY;
+    
+    // 5. Calculate tile data address (2bpp = 16 bytes/tile)
+    uint16_t tileAddr = m_bgTileAddr[bgIndex] + tileNumber * TILE_SIZE_BYTES;
+    
+    // VRAM boundary check
+    if (tileAddr + TILE_SIZE_BYTES > m_vram.size()) return {0, 0};
+    
+    // 6. Decode 2bpp tile data (corrected logic applied)
+    int line_offset = finalY; 
+    
+    uint8_t plane0_byte = m_vram[tileAddr + line_offset];
+    uint8_t plane1_byte = m_vram[tileAddr + line_offset + 8];
+
+    int bitPos = 7 - finalX; 
+
+    uint8_t pixelIndex = ((plane0_byte >> bitPos) & 1) | 
+                         (((plane1_byte >> bitPos) & 1) << 1); 
+    
+    // 7. Determine transparency and final color/priority
+    if (pixelIndex == 0) {
+        return {0, 0}; // Transparent (background color)
     }
     
-    // Decode 2bpp tile pixel
-    uint8_t pixelValue = 0;
-    if (pixelY < 8 && pixelX < 8) {
-        uint8_t plane0 = tileData[pixelY * 4 + pixelX / 4];
-        uint8_t plane1 = tileData[pixelY * 4 + pixelX / 4 + 16];
+    // --- DEBUG DUMP LOGIC START ---
+#ifdef DEBUG_PPU_RENDER
+    if (!isPixelTransparent[bgIndex]) {
+        isPixelTransparent[bgIndex] = true;
+        uint16_t base_color_index = palette * 4; 
+        uint16_t cgram_addr = (base_color_index + pixelIndex) * 2; 
+
+        static int dump_count = 0;
+        if (dump_count < 10000) {
+            std::ostringstream oss;
+            oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+            << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+            << "--- MEM DUMP: BG" << bgIndex <<" Pixel (" << m_scanline << "," << pixelY << "," << pixelY << ") ---" << std::endl;
+            
+            // 1. Tilemap Entry Dump (VRAM: CHR/ATTR)
+            oss << "  [Tilemap (CHR/ATTR)] VRAM Addr: 0x" << std::hex << mapAddr << " (2 bytes)" << std::endl;
+            oss << "    Entry: 0x" << tileEntry << " -> Tile #" << tileNumber << ", Palette #" << (int)palette << ", PriGrp " << (int)priorityGroup << std::dec << std::endl;
+
+            oss << "  [Tile Data (Pattern)] VRAM Addr: 0x" << std::hex << tileAddr << " (16 bytes base)" << std::dec << std::endl;
+            oss << "    Line " << finalY << " (Offset +" << line_offset << "): Plane0=0x" << std::hex << (int)plane0_byte << ", Plane1=0x" << (int)plane1_byte << std::dec << std::endl;
+            oss << "    Pixel Index (7-" << finalX << " bit): " << (int)pixelIndex << std::endl;
+
+            // 3. Palette Data Dump (CGRAM)
+            oss << "  [Palette (CGRAM)] CGRAM Addr: 0x" << std::hex << cgram_addr << " (2 bytes)" << std::dec << std::endl;
+            if (cgram_addr + 1 < m_cgram.size()) {
+                uint8_t cgram_low = m_cgram[cgram_addr];
+                uint8_t cgram_high = m_cgram[cgram_addr + 1];
+                uint16_t cgram_entry = cgram_low | (cgram_high << 8);
+                oss << "    CGRAM[0x" << std::hex << cgram_addr << "]=" << (int)cgram_low << ", [0x" << cgram_addr + 1 << "]=" << (int)cgram_high << std::dec << std::endl;
+                oss << "    15-bit Color: 0x" << std::hex << cgram_entry << std::dec << std::endl;
+            }
+            Logger::getInstance().logPPU(oss.str());
+            dump_count++;
+        }
+    }
+#endif
+    // --- DEBUG DUMP LOGIC END ---
+    
+    uint32_t color = getColor(palette, pixelIndex);
+    
+    uint8_t priority = m_bgPriority[bgIndex][priorityGroup]; 
+
+    return {color, priority};
+}
+
+// Main rendering function
+uint32_t PPU::renderBackgroundMode0(int x) {
+    int y = m_scanline; // Current scanline (m_scanline is a PPU member variable)
+    
+    // Store pixel information for 4 layers
+    PixelInfo bgPixels[4]; // BG1, BG2, BG3, BG4
+
+    // 1. Calculate pixel information for each background layer
+    // Each BG has its own scroll values
+    // BG1 (Index 0)
+    {
+        int bgX = x + m_bg1ScrollX;
+        int bgY = y + m_bg1ScrollY;
+        int tileX = bgX / 8;
+        int tileY = bgY / 8;
+        int pixelX = bgX % 8;
+        int pixelY = bgY % 8;
+        bgPixels[0] = renderBGx(0, tileX, tileY, pixelX, pixelY);
+    }
+    
+    // BG2 (Index 1)
+    {
+        int bgX = x + m_bg2ScrollX;
+        int bgY = y + m_bg2ScrollY;
+        int tileX = bgX / 8;
+        int tileY = bgY / 8;
+        int pixelX = bgX % 8;
+        int pixelY = bgY % 8;
+        bgPixels[1] = renderBGx(1, tileX, tileY, pixelX, pixelY);
+    }
+    
+    // BG3 (Index 2)
+    {
+        int bgX = x + m_bg3ScrollX;
+        int bgY = y + m_bg3ScrollY;
+        int tileX = bgX / 8;
+        int tileY = bgY / 8;
+        int pixelX = bgX % 8;
+        int pixelY = bgY % 8;
+        bgPixels[2] = renderBGx(2, tileX, tileY, pixelX, pixelY);
+    }
+    
+    // BG4 (Index 3)
+    {
+        int bgX = x + m_bg4ScrollX;
+        int bgY = y + m_bg4ScrollY;
+        int tileX = bgX / 8;
+        int tileY = bgY / 8;
+        int pixelX = bgX % 8;
+        int pixelY = bgY % 8;
+        bgPixels[3] = renderBGx(3, tileX, tileY, pixelX, pixelY);
+    }
+
+    // 2. Check Main Screen Designation (TM register) - only render enabled BGs
+    // Bit 0 = BG1, Bit 1 = BG2, Bit 2 = BG3, Bit 3 = BG4
+    
+    // 3. Determine pixel priority (select pixel with highest priority)
+    // Sprite rendering results should also be considered, but here we only handle backgrounds.
+    
+    uint32_t finalColor = 0;
+    uint8_t maxPriority = 0;
+
+    for (int i = 0; i < 4; ++i) {
+        // Check if this BG is enabled in Main Screen Designation
+        if (!(m_mainScreenDesignation & (1 << i))) {
+            continue; // Skip disabled BG
+        }
         
-        // Extract 2-bit pixel value
-        int bitPos = (pixelX % 4) * 2;
-        pixelValue = ((plane0 >> bitPos) & 1) | (((plane1 >> bitPos) & 1) << 1);
-    }
-    
-    // Get color from palette
-    uint32_t color = getColor(palette, pixelValue);
-    
-    // Debug: Print first few pixels
-    if (x < 5 && m_scanline == 0) {
-        std::cout << "    renderBackgroundMode0: x=" << x << " tileNumber=" << tileNumber 
-                  << " palette=" << (int)palette << " pixelValue=" << (int)pixelValue 
-                  << " color=0x" << std::hex << color << std::dec << std::endl;
-        std::cout << "    VRAM tile data: ";
-        for (int i = 0; i < 8; i++) {
-            std::cout << std::hex << (int)tileData[i] << " ";
+        if (bgPixels[i].color != 0) { // Only consider non-transparent pixels
+            if (bgPixels[i].priority > maxPriority) {
+                maxPriority = bgPixels[i].priority;
+                finalColor = bgPixels[i].color;
+            }
         }
-        std::cout << std::dec << std::endl;
     }
-    
-    return color;
+
+    // If no BG pixel was found, use background color (CGRAM[0])
+    if (finalColor == 0) {
+        uint16_t bgColor = m_cgram[0] | (m_cgram[1] << 8);
+        if (bgColor == 0) {
+            // Default to black if CGRAM[0] is not set
+            return 0xFF000000;
+        }
+        // Extract RGB components (5 bits each)
+        uint8_t r = (bgColor & 0x1F) << 3;
+        uint8_t g = ((bgColor >> 5) & 0x1F) << 3;
+        uint8_t b = ((bgColor >> 10) & 0x1F) << 3;
+        // Convert to 32-bit RGBA
+        return (0xFF << 24) | (b << 16) | (g << 8) | r;
+    }
+
+    // Return final color. (Background color before Sprite or Color Math is applied)
+    return finalColor;
 }
 
 uint32_t PPU::renderBackgroundMode1(int x) {
-    // Debug: Print when function is called
-    if (x < 5 && m_scanline == 0) {
-        std::cout << "    renderBackgroundMode1() called for x=" << x << std::endl;
+    int y = m_scanline;
+    
+    // Mode 1: BG1/BG2=4bpp, BG3=2bpp
+    // Apply scrolling to screen coordinates
+    int bg1X = x + m_bg1ScrollX;
+    int bg1Y = y + m_bg1ScrollY;
+    int bg2X = x + m_bg2ScrollX;
+    int bg2Y = y + m_bg2ScrollY;
+    int bg3X = x + m_bg3ScrollX;
+    int bg3Y = y + m_bg3ScrollY;
+    
+    // Calculate tile and pixel coordinates for each BG
+    int bg1TileX = bg1X / 8, bg1TileY = bg1Y / 8, bg1PixelX = bg1X % 8, bg1PixelY = bg1Y % 8;
+    int bg2TileX = bg2X / 8, bg2TileY = bg2Y / 8, bg2PixelX = bg2X % 8, bg2PixelY = bg2Y % 8;
+    int bg3TileX = bg3X / 8, bg3TileY = bg3Y / 8, bg3PixelX = bg3X % 8, bg3PixelY = bg3Y % 8;
+    
+    // Store pixel information for 3 layers
+    PixelInfo bgPixels[3]; // BG1, BG2, BG3
+    
+    // BG1 (4bpp)
+    bgPixels[0] = renderBGx(0, bg1TileX, bg1TileY, bg1PixelX, bg1PixelY);
+    
+    // BG2 (4bpp)
+    bgPixels[1] = renderBGx(1, bg2TileX, bg2TileY, bg2PixelX, bg2PixelY);
+    
+    // BG3 (2bpp) - need special handling
+    bgPixels[2] = renderBG3Pixel(bg3TileX * 8 + bg3PixelX, bg3TileY * 8 + bg3PixelY);
+    
+    // Determine pixel priority (select pixel with highest priority)
+    uint32_t finalColor = 0;
+    uint8_t maxPriority = 0;
+    
+    for (int i = 0; i < 3; ++i) {
+        if (bgPixels[i].color != 0) { // Only consider non-transparent pixels
+            if (bgPixels[i].priority > maxPriority) {
+                maxPriority = bgPixels[i].priority;
+                finalColor = bgPixels[i].color;
+            }
+        }
     }
     
-    // Mode 1: BG1/BG2 4bpp, BG3 2bpp
-    // For now, render a simple test pattern
-    return renderTestPattern(x);
+    return finalColor;
 }
 
 uint32_t PPU::renderTestPattern(int x) {
@@ -463,10 +762,22 @@ uint32_t PPU::renderTestPattern(int x) {
 }
 
 uint32_t PPU::getColor(uint8_t paletteIndex, uint8_t colorIndex) {
+    return getColor(paletteIndex, colorIndex, 4); // Default to 4bpp
+}
+
+uint32_t PPU::getColor(uint8_t paletteIndex, uint8_t colorIndex, int bpp) {
     // SNES uses 15-bit color (5 bits per channel)
     // CGRAM stores colors as little-endian 16-bit values
-    // Each palette has 16 colors (for 4bpp), starting at paletteIndex * 16
-    uint16_t cgramIndex = (paletteIndex * 16 + colorIndex) * 2;
+    
+    uint16_t cgramIndex;
+    if (bpp == 2) {
+        // 2bpp: Each palette has 4 colors, starting at paletteIndex * 4
+        cgramIndex = (paletteIndex * 4 + colorIndex) * 2;
+    } else {
+        // 4bpp: Each palette has 16 colors, starting at paletteIndex * 16
+        cgramIndex = (paletteIndex * 16 + colorIndex) * 2;
+    }
+    
     if (cgramIndex >= m_cgram.size()) {
         // Return test colors if CGRAM is not initialized
         if (paletteIndex == 0) return 0xFF0000FF; // Blue
@@ -521,7 +832,6 @@ void PPU::decodeTile(const uint8_t* tileData, uint8_t output[64], int bpp) {
         }
     }
 }
-
 uint32_t PPU::renderBG1(int x, int y) {
     // BG1 rendering for a single pixel
     int tileX = x / 8;
@@ -529,32 +839,37 @@ uint32_t PPU::renderBG1(int x, int y) {
     int pixelX = x % 8;
     int pixelY = y % 8;
     
+    // --- 1. VRAM Boundary Check for Tilemap Entry ---
     // Get tilemap entry from VRAM
     uint16_t mapAddr = m_bg1MapAddr + (tileY * 32 + tileX) * 2; // 2 bytes per tilemap entry
     
-    if (mapAddr + 1 >= m_vram.size()) return 0;
+    if (mapAddr + 1 >= m_vram.size()) {
+        std::cout << "DEBUG_RENDER: FAIL - Tilemap address out of bounds at (tileX=" << tileX << ", tileY=" << tileY << ")! mapAddr=0x" << std::hex << mapAddr << std::dec << std::endl;
+        return 0;
+    }
     
     // Read tilemap entry (16-bit)
     uint16_t tileEntry = m_vram[mapAddr] | (m_vram[mapAddr + 1] << 8);
     
-    // Debug: Print first few tilemap entries
+    // Debug: Print first few tilemap entries (Existing Debug)
     static int tilemapDebugCount = 0;
-    if (tilemapDebugCount < 10 && tileX < 5 && tileY < 5) {
+    if (tilemapDebugCount < 1000 && tileX < 5 && tileY < 5) {
         std::cout << "Tilemap[" << tileX << "," << tileY << "] at 0x" << std::hex << mapAddr 
                   << " = 0x" << tileEntry << std::dec << std::endl;
         tilemapDebugCount++;
     }
     
-    // Extract tile number and attributes
-    uint16_t tileNumber = tileEntry & 0x03FF;  // 10 bits for tile number
-    uint8_t palette = (tileEntry >> 10) & 0x07; // 3 bits for palette
-    bool hFlip = (tileEntry & 0x4000) != 0;    // Horizontal flip
-    bool vFlip = (tileEntry & 0x8000) != 0;    // Vertical flip
+    uint16_t tileNumber = tileEntry & 0x03FF;
+    uint8_t palette = (tileEntry >> 10) & 0x07;
+    bool hFlip = (tileEntry & 0x4000) != 0;
+    bool vFlip = (tileEntry & 0x8000) != 0;
     
-    // Calculate tile data address
-    uint16_t tileAddr = m_bg1TileAddr + tileNumber * 32; // 32 bytes per tile
+    uint16_t tileAddr = m_bg1TileAddr + tileNumber * 32;
     
-    if (tileAddr + 32 > m_vram.size()) return 0;
+    if (tileAddr + 32 > m_vram.size()) {
+        std::cout << "DEBUG_RENDER: FAIL - Tile data address out of bounds for tile number " << tileNumber << "! tileAddr=0x" << std::hex << tileAddr << std::dec << std::endl;
+        return 0;
+    }
     
     // Decode tile
     uint8_t tileData[32];
@@ -570,9 +885,18 @@ uint32_t PPU::renderBG1(int x, int y) {
     int finalY = vFlip ? (7 - pixelY) : pixelY;
     
     uint8_t pixelIndex = pixels[finalY * 8 + finalX];
+
+    // --- 3. Transparency Check and Successful Render Log ---
     if (pixelIndex != 0) { // Not transparent
+        // Successful rendering condition met
+        std::cout << "DEBUG_RENDER: SUCCESS - Rendered pixel at (x=" << x << ", y=" << y << ") | Tile: " << tileNumber
+                  << ", Palette: " << (int)palette << ", Index: " << (int)pixelIndex << std::endl;
         return getColor(palette, pixelIndex);
     }
+    
+    // Log for transparent pixel
+    // Note: This log can be very noisy, so it's commented out by default.
+    // std::cout << "DEBUG_RENDER: SKIP - Pixel transparent at (x=" << x << ", y=" << y << ")" << std::endl;
     
     return 0; // Transparent
 }
@@ -624,25 +948,243 @@ uint32_t PPU::renderBG2(int x, int y) {
     return 0; // Transparent
 }
 
+uint32_t PPU::renderBG3(int x, int y) {
+    // BG3 rendering for a single pixel
+    int tileX = x / 8;
+    int tileY = y / 8;
+    int pixelX = x % 8;
+    int pixelY = y % 8;
+    
+    // Get tilemap entry from VRAM
+    uint16_t mapAddr = m_bg3MapAddr + (tileY * 32 + tileX) * 2; // 2 bytes per tilemap entry
+    
+    if (mapAddr + 1 >= m_vram.size()) return 0;
+    
+    // Read tilemap entry (16-bit)
+    uint16_t tileEntry = m_vram[mapAddr] | (m_vram[mapAddr + 1] << 8);
+    
+    // Extract tile number and attributes
+    uint16_t tileNumber = tileEntry & 0x03FF;  // 10 bits for tile number
+    uint8_t palette = (tileEntry >> 10) & 0x01; // 1 bit for palette (2bpp)
+    bool hFlip = (tileEntry & 0x4000) != 0;    // Horizontal flip
+    bool vFlip = (tileEntry & 0x8000) != 0;    // Vertical flip
+    
+    // Calculate tile data address (2bpp = 16 bytes per tile)
+    uint16_t tileAddr = m_bg3TileAddr + tileNumber * 16;
+    
+    if (tileAddr + 16 > m_vram.size()) return 0;
+    
+    // Decode 2bpp tile
+    uint8_t pixels[64];
+    for (int py = 0; py < 8; py++) {
+        uint8_t plane0 = m_vram[tileAddr + py];
+        uint8_t plane1 = m_vram[tileAddr + py + 8];
+        
+        for (int px = 0; px < 8; px++) {
+            int bit = 7 - px;
+            uint8_t pixel = ((plane0 >> bit) & 1) | (((plane1 >> bit) & 1) << 1);
+            pixels[py * 8 + px] = pixel;
+        }
+    }
+    
+    // Apply flipping
+    int finalX = hFlip ? (7 - pixelX) : pixelX;
+    int finalY = vFlip ? (7 - pixelY) : pixelY;
+    
+    uint8_t pixelIndex = pixels[finalY * 8 + finalX];
+    if (pixelIndex != 0) { // Not transparent
+        return getColor(palette, pixelIndex, 2); // 2bpp for BG3
+    }
+    
+    return 0; // Transparent
+}
+
+uint32_t PPU::renderBG4(int x, int y) {
+    // BG4 rendering for a single pixel
+    int tileX = x / 8;
+    int tileY = y / 8;
+    int pixelX = x % 8;
+    int pixelY = y % 8;
+    
+    // Get tilemap entry from VRAM
+    uint16_t mapAddr = m_bg4MapAddr + (tileY * 32 + tileX) * 2; // 2 bytes per tilemap entry
+    
+    if (mapAddr + 1 >= m_vram.size()) return 0;
+    
+    // Read tilemap entry (16-bit)
+    uint16_t tileEntry = m_vram[mapAddr] | (m_vram[mapAddr + 1] << 8);
+    
+    // Extract tile number and attributes
+    uint16_t tileNumber = tileEntry & 0x03FF;  // 10 bits for tile number
+    uint8_t palette = (tileEntry >> 10) & 0x01; // 1 bit for palette (2bpp)
+    bool hFlip = (tileEntry & 0x4000) != 0;    // Horizontal flip
+    bool vFlip = (tileEntry & 0x8000) != 0;    // Vertical flip
+    
+    // Calculate tile data address (2bpp = 16 bytes per tile)
+    uint16_t tileAddr = m_bg4TileAddr + tileNumber * 16;
+    
+    if (tileAddr + 16 > m_vram.size()) return 0;
+    
+    // Decode 2bpp tile
+    uint8_t pixels[64];
+    for (int py = 0; py < 8; py++) {
+        uint8_t plane0 = m_vram[tileAddr + py];
+        uint8_t plane1 = m_vram[tileAddr + py + 8];
+        
+        for (int px = 0; px < 8; px++) {
+            int bit = 7 - px;
+            uint8_t pixel = ((plane0 >> bit) & 1) | (((plane1 >> bit) & 1) << 1);
+            pixels[py * 8 + px] = pixel;
+        }
+    }
+    
+    // Apply flipping
+    int finalX = hFlip ? (7 - pixelX) : pixelX;
+    int finalY = vFlip ? (7 - pixelY) : pixelY;
+    
+    uint8_t pixelIndex = pixels[finalY * 8 + finalX];
+    if (pixelIndex != 0) { // Not transparent
+        return getColor(palette, pixelIndex, 2); // 2bpp for BG4
+    }
+    
+    return 0; // Transparent
+}
+
+PixelInfo PPU::renderBG3Pixel(int x, int y) {
+    // BG3 rendering returning PixelInfo for Mode 1
+    int tileX = x / 8;
+    int tileY = y / 8;
+    int pixelX = x % 8;
+    int pixelY = y % 8;
+    
+    // Get tilemap entry from VRAM
+    uint16_t mapAddr = m_bg3MapAddr + (tileY * 32 + tileX) * 2;
+    
+    if (mapAddr + 1 >= m_vram.size()) return {0, 0};
+    
+    // Read tilemap entry (16-bit)
+    uint16_t tileEntry = m_vram[mapAddr] | (m_vram[mapAddr + 1] << 8);
+    
+    // Extract tile number and attributes
+    uint16_t tileNumber = tileEntry & 0x03FF;
+    uint8_t palette = (tileEntry >> 10) & 0x01; // 1 bit for palette (2bpp)
+    bool hFlip = (tileEntry & 0x4000) != 0;
+    bool vFlip = (tileEntry & 0x8000) != 0;
+    uint8_t priorityGroup = (tileEntry >> 13) & 1;
+    
+    // Calculate tile data address (2bpp = 16 bytes per tile)
+    uint16_t tileAddr = m_bg3TileAddr + tileNumber * 16;
+    
+    if (tileAddr + 16 > m_vram.size()) return {0, 0};
+    
+    // Decode 2bpp tile
+    uint8_t pixels[64];
+    for (int py = 0; py < 8; py++) {
+        uint8_t plane0 = m_vram[tileAddr + py];
+        uint8_t plane1 = m_vram[tileAddr + py + 8];
+        
+        for (int px = 0; px < 8; px++) {
+            int bit = 7 - px;
+            uint8_t pixel = ((plane0 >> bit) & 1) | (((plane1 >> bit) & 1) << 1);
+            pixels[py * 8 + px] = pixel;
+        }
+    }
+    
+    // Apply flipping
+    int finalX = hFlip ? (7 - pixelX) : pixelX;
+    int finalY = vFlip ? (7 - pixelY) : pixelY;
+    
+    uint8_t pixelIndex = pixels[finalY * 8 + finalX];
+    if (pixelIndex != 0) { // Not transparent
+        uint32_t color = getColor(palette, pixelIndex, 2); // 2bpp for BG3
+        uint8_t priority = m_bgPriority[2][priorityGroup];
+        return {color, priority};
+    }
+    
+    return {0, 0}; // Transparent
+}
+
+PixelInfo PPU::renderBG4Pixel(int x, int y) {
+    // BG4 rendering returning PixelInfo for Mode 1
+    int tileX = x / 8;
+    int tileY = y / 8;
+    int pixelX = x % 8;
+    int pixelY = y % 8;
+    
+    // Get tilemap entry from VRAM
+    uint16_t mapAddr = m_bg4MapAddr + (tileY * 32 + tileX) * 2;
+    
+    if (mapAddr + 1 >= m_vram.size()) return {0, 0};
+    
+    // Read tilemap entry (16-bit)
+    uint16_t tileEntry = m_vram[mapAddr] | (m_vram[mapAddr + 1] << 8);
+    
+    // Extract tile number and attributes
+    uint16_t tileNumber = tileEntry & 0x03FF;
+    uint8_t palette = (tileEntry >> 10) & 0x01; // 1 bit for palette (2bpp)
+    bool hFlip = (tileEntry & 0x4000) != 0;
+    bool vFlip = (tileEntry & 0x8000) != 0;
+    uint8_t priorityGroup = (tileEntry >> 13) & 1;
+    
+    // Calculate tile data address (2bpp = 16 bytes per tile)
+    uint16_t tileAddr = m_bg4TileAddr + tileNumber * 16;
+    
+    if (tileAddr + 16 > m_vram.size()) return {0, 0};
+    
+    // Decode 2bpp tile
+    uint8_t pixels[64];
+    for (int py = 0; py < 8; py++) {
+        uint8_t plane0 = m_vram[tileAddr + py];
+        uint8_t plane1 = m_vram[tileAddr + py + 8];
+        
+        for (int px = 0; px < 8; px++) {
+            int bit = 7 - px;
+            uint8_t pixel = ((plane0 >> bit) & 1) | (((plane1 >> bit) & 1) << 1);
+            pixels[py * 8 + px] = pixel;
+        }
+    }
+    
+    // Apply flipping
+    int finalX = hFlip ? (7 - pixelX) : pixelX;
+    int finalY = vFlip ? (7 - pixelY) : pixelY;
+    
+    uint8_t pixelIndex = pixels[finalY * 8 + finalX];
+    if (pixelIndex != 0) { // Not transparent
+        uint32_t color = getColor(palette, pixelIndex, 2); // 2bpp for BG4
+        uint8_t priority = m_bgPriority[3][priorityGroup];
+        return {color, priority};
+    }
+    
+    return {0, 0}; // Transparent
+}
+
 
 void PPU::writeRegister(uint16_t address, uint8_t value) {
+    // Log VRAM writes (0x2116-0x2119) for debugging
+    if(!(address >= 0x2116 && address <= 0x2119)) {
     std::ostringstream oss;
     oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
         << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
         << "Scanline:" << std::setw(3) << m_scanline << " | "
         << "PPU Write: [$" << std::hex << (int)address << "] = $" << (int)value << std::dec << std::endl;
     Logger::getInstance().logPPU(oss.str());
-    Logger::getInstance().flush();  // Flush at frame end
-
+        // Don't flush here - too frequent, causes performance issues
+    }
     switch (address) {
         case 0x2100: { // INIDISP - Screen Display
             m_brightness = value & 0x0F;
             m_forcedBlank = (value & 0x80) != 0;
             static int displayChangeCount = 0;
-            if (displayChangeCount < 10) {
-                std::cout << "PPU: INIDISP=$" << std::hex << (int)value << std::dec 
+            if (displayChangeCount < 1000) {
+                
+                std::ostringstream oss;
+                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                    << "PPU: INIDISP=$" << std::hex << (int)value << std::dec 
                           << " - Forced blank " << (m_forcedBlank ? "ON" : "OFF") 
                           << ", brightness=" << (int)m_brightness << std::endl;
+                Logger::getInstance().logPPU(oss.str());
+                Logger::getInstance().flush();
                 displayChangeCount++;
             }
             
@@ -653,8 +1195,14 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         case 0x4200: { // NMITIMEN - Interrupt Enable
             m_nmiEnabled = (value & 0x80) != 0;
             static int nmiEnableCount = 0;
-            if (nmiEnableCount < 3) {
-                std::cout << "PPU: NMI " << (m_nmiEnabled ? "ENABLED" : "DISABLED") << std::endl;
+            if (nmiEnableCount < 300) {
+                
+                std::ostringstream oss;
+                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                    << "PPU: NMI " << (m_nmiEnabled ? "ENABLED" : "DISABLED") << std::endl;
+                Logger::getInstance().logPPU(oss.str());
+                Logger::getInstance().flush();  // Flush at frame end
                 nmiEnableCount++;
             }
             break;
@@ -663,8 +1211,13 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         case 0x420B: { // MDMAEN - DMA Enable
             // DMA not implemented yet, just acknowledge the write
             static int dmaEnCount = 0;
-            if (dmaEnCount < 3) {
-                std::cout << "PPU: DMA Enable=$" << std::hex << (int)value << std::dec << std::endl;
+            if (dmaEnCount < 300) {
+                std::ostringstream oss;
+                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                    << "PPU: DMA Enable=$"  << std::hex << (int)value << std::dec << std::endl;
+                Logger::getInstance().logPPU(oss.str());
+                Logger::getInstance().flush();  // Flush at frame end
                 dmaEnCount++;
             }
             break;
@@ -673,8 +1226,13 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         case 0x420C: { // HDMAEN - HDMA Enable
             // HDMA not implemented yet, just acknowledge the write
             static int hdmaEnCount = 0;
-            if (hdmaEnCount < 3) {
-                std::cout << "PPU: HDMA Enable=$" << std::hex << (int)value << std::dec << std::endl;
+            if (hdmaEnCount < 300) {
+                std::ostringstream oss;
+                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                    << "PPU: HDMA Enable=$" << std::hex << (int)value << std::dec << std::endl;
+                Logger::getInstance().logPPU(oss.str());
+                Logger::getInstance().flush();  // Flush at frame end
                 hdmaEnCount++;
             }
             break;
@@ -683,8 +1241,13 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         case 0x2101: { // OBSEL - Object Size and Base Address
             m_objSize = value;
             static int obselCount = 0;
-            if (obselCount < 3) {
-                std::cout << "PPU: OBSEL=$" << std::hex << (int)value << std::dec << std::endl;
+            if (obselCount < 300) {
+                std::ostringstream oss;
+                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                    << "PPU: OBSEL=$" << std::hex << (int)value << std::dec << std::endl;
+                Logger::getInstance().logPPU(oss.str());
+                Logger::getInstance().flush();  // Flush at frame end
                 obselCount++;
             }
             break;
@@ -692,18 +1255,50 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             
         case 0x2105: { // BGMODE - BG Mode and Character Size
             m_bgMode = value & 0x07;
+            
+            // Update priority settings based on BG mode
+            switch (m_bgMode) {
+                case 0: // Mode 0: All BGs are 2bpp (4 colors)
+                    m_bgPriority[0][0] = 0; m_bgPriority[0][1] = 3; // BG1
+                    m_bgPriority[1][0] = 0; m_bgPriority[1][1] = 2; // BG2
+                    m_bgPriority[2][0] = 0; m_bgPriority[2][1] = 1; // BG3
+                    m_bgPriority[3][0] = 0; m_bgPriority[3][1] = 0; // BG4
+                    break;
+                case 1: // Mode 1: BG1/BG2=4bpp, BG3=2bpp
+                    m_bgPriority[0][0] = 1; m_bgPriority[0][1] = 3; // BG1
+                    m_bgPriority[1][0] = 0; m_bgPriority[1][1] = 2; // BG2
+                    m_bgPriority[2][0] = 0; m_bgPriority[2][1] = 1; // BG3
+                    m_bgPriority[3][0] = 0; m_bgPriority[3][1] = 0; // BG4 (not used)
+                    break;
+                default:
+                    // Add other modes as needed
+                    break;
+            }
+            
             static int bgModeCount = 0;
             if (bgModeCount < 10) {
-                std::cout << "PPU: BGMODE=$" << std::hex << (int)value << std::dec 
+                std::ostringstream oss;
+                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                    << "PPU: BGMODE=$" << std::hex << (int)value << std::dec 
                           << " - BG Mode=" << (int)m_bgMode << std::endl;
+                Logger::getInstance().logPPU(oss.str());
+                Logger::getInstance().flush();  // Flush at frame end
                 bgModeCount++;
             }
             break;
         }
             
-        case 0x2106: // MOSAIC - Mosaic Size and Enable
-            // Ignore for now
+        case 0x2106: { // MOSAIC - Mosaic Size and Enable
+            // Bits 0-3: Mosaic size (0 = disabled, 1-15 = size)
+            // Bits 4-7: Mosaic enable for BG1-4
+            m_mosaicSize = value & 0x0F;
+            m_mosaicEnabled[0] = (value & 0x10) != 0; // BG1
+            m_mosaicEnabled[1] = (value & 0x20) != 0; // BG2
+            m_mosaicEnabled[2] = (value & 0x40) != 0; // BG3
+            m_mosaicEnabled[3] = (value & 0x80) != 0; // BG4
             break;
+        }
             
         case 0x2116: { // VMADDL - VRAM Address Low
             m_vramAddress = (m_vramAddress & 0xFF00) | value;
@@ -714,7 +1309,13 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             m_vramAddress = (m_vramAddress & 0x00FF) | (value << 8);
             static int vramAddrCount = 0;
             if (vramAddrCount < 3) {
-                std::cout << "PPU: VRAM Address=0x" << std::hex << m_vramAddress << std::dec << std::endl;
+                
+                std::ostringstream oss;
+                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                    << "PPU: VRAM Address=0x" << std::hex << m_vramAddress << std::dec << std::endl;
+                Logger::getInstance().logPPU(oss.str());
+                Logger::getInstance().flush();  // Flush at frame end
                 vramAddrCount++;
             }
             break;
@@ -747,7 +1348,13 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             m_cgramAddress = value;
             static int cgaddCount = 0;
             if (cgaddCount < 3) {
-                std::cout << "PPU: CGRAM Address=0x" << std::hex << (int)m_cgramAddress << std::dec << std::endl;
+                
+                std::ostringstream oss;
+                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                    << "PPU: CGRAM Address=0x" << std::hex << (int)m_cgramAddress << std::dec << std::endl;
+                Logger::getInstance().logPPU(oss.str());
+                Logger::getInstance().flush();  // Flush at frame end
                 cgaddCount++;
             }
             break;
@@ -758,43 +1365,73 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             m_cgramAddress++;
             m_cgramAddress &= 0x01FF;
             if (m_cgramAddress <= 10) {
-                std::cout << "CGRAM[" << std::dec << (m_cgramAddress - 1) 
+                std::ostringstream oss;
+                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                    << "CGRAM[" << std::dec << (m_cgramAddress - 1) 
                           << "] = 0x" << std::hex << (int)value << std::dec << std::endl;
+                Logger::getInstance().logPPU(oss.str());
+                Logger::getInstance().flush();  // Flush at frame end
             }
             break;
         }
             
         case 0x2107: { // BG1SC - BG1 Tilemap Address
             m_bg1MapAddr = (value & 0xFC) << 8;
+            m_bgMapAddr[0] = m_bg1MapAddr; // Sync array
+            m_bgMapSize[0] = (value & 0x80) != 0; // Bit 7: 0=32x32, 1=64x64
             static int bg1MapCount = 0;
             if (bg1MapCount < 3) {
-                std::cout << "PPU: BG1SC=$" << std::hex << (int)value << std::dec 
-                          << " - BG1 Map Addr=0x" << std::hex << m_bg1MapAddr << std::dec << std::endl;
+                std::ostringstream oss;
+                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                    << "PPU: BG1SC=$" << std::hex << (int)value << std::dec 
+                          << " - BG1 Map Addr=0x" << std::hex << m_bg1MapAddr 
+                          << ", Size=" << (m_bgMapSize[0] ? "64x64" : "32x32") << std::dec << std::endl;
+                Logger::getInstance().logPPU(oss.str());
+                Logger::getInstance().flush();  // Flush at frame end
                 bg1MapCount++;
             }
             break;
         }
             
-        case 0x2108: // BG2SC - BG2 Tilemap Address
+        case 0x2108: { // BG2SC - BG2 Tilemap Address
             m_bg2MapAddr = (value & 0xFC) << 8;
+            m_bgMapAddr[1] = m_bg2MapAddr; // Sync array
+            m_bgMapSize[1] = (value & 0x80) != 0; // Bit 7: 0=32x32, 1=64x64
             break;
+        }
             
-        case 0x2109: // BG3SC - BG3 Tilemap Address
+        case 0x2109: { // BG3SC - BG3 Tilemap Address
             m_bg3MapAddr = (value & 0xFC) << 8;
+            m_bgMapAddr[2] = m_bg3MapAddr; // Sync array
+            m_bgMapSize[2] = (value & 0x80) != 0; // Bit 7: 0=32x32, 1=64x64
             break;
+        }
             
-        case 0x210A: // BG4SC - BG4 Tilemap Address
+        case 0x210A: { // BG4SC - BG4 Tilemap Address
             m_bg4MapAddr = (value & 0xFC) << 8;
+            m_bgMapAddr[3] = m_bg4MapAddr; // Sync array
+            m_bgMapSize[3] = (value & 0x80) != 0; // Bit 7: 0=32x32, 1=64x64
             break;
+        }
             
         case 0x210B: { // BG12NBA - BG1 and BG2 Tile Data Address
             m_bg1TileAddr = (value & 0x0F) << 12;
             m_bg2TileAddr = ((value & 0xF0) >> 4) << 12;
+            m_bgTileAddr[0] = m_bg1TileAddr; // Sync array
+            m_bgTileAddr[1] = m_bg2TileAddr; // Sync array
             static int bg12nbaCount = 0;
             if (bg12nbaCount < 10) {
-                std::cout << "PPU: BG12NBA=$" << std::hex << (int)value << std::dec 
+                
+                std::ostringstream oss;
+                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                    << "PPU: BG12NBA=$" << std::hex << (int)value << std::dec 
                           << " - BG1 tiles at 0x" << std::hex << m_bg1TileAddr 
                           << ", BG2 tiles at 0x" << m_bg2TileAddr << std::dec << std::endl;
+                Logger::getInstance().logPPU(oss.str());
+                Logger::getInstance().flush();  // Flush at frame end
                 bg12nbaCount++;
             }
             break;
@@ -803,12 +1440,21 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         case 0x210C: { // BG34NBA - BG3 and BG4 Tile Data Address
             m_bg3TileAddr = (value & 0x0F) << 12;
             m_bg4TileAddr = ((value & 0xF0) >> 4) << 12;
+            m_bgTileAddr[2] = m_bg3TileAddr; // Sync array
+            m_bgTileAddr[3] = m_bg4TileAddr; // Sync array
             break;
         }
             
-        case 0x210D: { // BG1HOFS - BG1 Horizontal Scroll
-            // Scroll registers use a write-twice mechanism
-            m_bg1ScrollX = (m_bg1ScrollX & 0xFF00) | m_scrollPrevX;
+        case 0x210D: { // BG1HOFS - BG1 Horizontal Scroll (Low)
+            // SNES scroll registers: First write = low byte, second write = high byte
+            // On first write, update low byte. On second write, update high byte and combine.
+            if (m_scrollLatchX) {
+                // Second write: update high byte
+                m_bg1ScrollX = (m_bg1ScrollX & 0x00FF) | (value << 8);
+            } else {
+                // First write: update low byte (but store for next write)
+                m_bg1ScrollX = (m_bg1ScrollX & 0xFF00) | value;
+            }
             m_scrollPrevX = value;
             m_scrollLatchX = !m_scrollLatchX;
             static int bg1HofsCount = 0;
@@ -819,42 +1465,82 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             break;
         }
             
-        case 0x210E: { // BG1VOFS - BG1 Vertical Scroll
-            m_bg1ScrollY = (m_bg1ScrollY & 0xFF00) | m_scrollPrevY;
+        case 0x210E: { // BG1VOFS - BG1 Vertical Scroll (Low)
+            if (m_scrollLatchY) {
+                m_bg1ScrollY = (m_bg1ScrollY & 0x00FF) | (value << 8);
+            } else {
+                m_bg1ScrollY = (m_bg1ScrollY & 0xFF00) | value;
+            }
             m_scrollPrevY = value;
             m_scrollLatchY = !m_scrollLatchY;
             break;
         }
             
-        case 0x210F: // BG2HOFS - BG2 Horizontal Scroll
-            m_bg2ScrollX = (m_bg2ScrollX & 0xFF00) | m_scrollPrevX;
+        case 0x210F: { // BG2HOFS - BG2 Horizontal Scroll (Low)
+            if (m_scrollLatchX) {
+                m_bg2ScrollX = (m_bg2ScrollX & 0x00FF) | (value << 8);
+            } else {
+                m_bg2ScrollX = (m_bg2ScrollX & 0xFF00) | value;
+            }
             m_scrollPrevX = value;
+            m_scrollLatchX = !m_scrollLatchX;
             break;
+        }
             
-        case 0x2110: // BG2VOFS - BG2 Vertical Scroll
-            m_bg2ScrollY = (m_bg2ScrollY & 0xFF00) | m_scrollPrevY;
+        case 0x2110: { // BG2VOFS - BG2 Vertical Scroll (Low)
+            if (m_scrollLatchY) {
+                m_bg2ScrollY = (m_bg2ScrollY & 0x00FF) | (value << 8);
+            } else {
+                m_bg2ScrollY = (m_bg2ScrollY & 0xFF00) | value;
+            }
             m_scrollPrevY = value;
+            m_scrollLatchY = !m_scrollLatchY;
             break;
+        }
             
-        case 0x2111: // BG3HOFS - BG3 Horizontal Scroll
-            m_bg3ScrollX = (m_bg3ScrollX & 0xFF00) | m_scrollPrevX;
+        case 0x2111: { // BG3HOFS - BG3 Horizontal Scroll (Low)
+            if (m_scrollLatchX) {
+                m_bg3ScrollX = (m_bg3ScrollX & 0x00FF) | (value << 8);
+            } else {
+                m_bg3ScrollX = (m_bg3ScrollX & 0xFF00) | value;
+            }
             m_scrollPrevX = value;
+            m_scrollLatchX = !m_scrollLatchX;
             break;
+        }
             
-        case 0x2112: // BG3VOFS - BG3 Vertical Scroll
-            m_bg3ScrollY = (m_bg3ScrollY & 0xFF00) | m_scrollPrevY;
+        case 0x2112: { // BG3VOFS - BG3 Vertical Scroll (Low)
+            if (m_scrollLatchY) {
+                m_bg3ScrollY = (m_bg3ScrollY & 0x00FF) | (value << 8);
+            } else {
+                m_bg3ScrollY = (m_bg3ScrollY & 0xFF00) | value;
+            }
             m_scrollPrevY = value;
+            m_scrollLatchY = !m_scrollLatchY;
             break;
+        }
             
-        case 0x2113: // BG4HOFS - BG4 Horizontal Scroll
-            m_bg4ScrollX = (m_bg4ScrollX & 0xFF00) | m_scrollPrevX;
+        case 0x2113: { // BG4HOFS - BG4 Horizontal Scroll (Low)
+            if (m_scrollLatchX) {
+                m_bg4ScrollX = (m_bg4ScrollX & 0x00FF) | (value << 8);
+            } else {
+                m_bg4ScrollX = (m_bg4ScrollX & 0xFF00) | value;
+            }
             m_scrollPrevX = value;
+            m_scrollLatchX = !m_scrollLatchX;
             break;
+        }
             
-        case 0x2114: // BG4VOFS - BG4 Vertical Scroll
-            m_bg4ScrollY = (m_bg4ScrollY & 0xFF00) | m_scrollPrevY;
+        case 0x2114: { // BG4VOFS - BG4 Vertical Scroll (Low)
+            if (m_scrollLatchY) {
+                m_bg4ScrollY = (m_bg4ScrollY & 0x00FF) | (value << 8);
+            } else {
+                m_bg4ScrollY = (m_bg4ScrollY & 0xFF00) | value;
+            }
             m_scrollPrevY = value;
+            m_scrollLatchY = !m_scrollLatchY;
             break;
+        }
             
         case 0x2115: { // VMAIN - VRAM Address Increment Mode
             m_vramIncrement = value & 0x03;  // Bits 0-1: increment size (00=1, 01=32, 10/11=128)
@@ -893,27 +1579,61 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             break;
         }
             
-        case 0x212D: // TS - Sub Screen Designation
+        case 0x212D: { // TS - Sub Screen Designation
             m_subScreenDesignation = value;
+            break;
+        }
+            
+        case 0x2123: // W12SEL - Window Mask Settings for BG1 and BG2
+            m_w12sel = value;
+            break;
+            
+        case 0x2124: // W34SEL - Window Mask Settings for BG3 and BG4
+            m_w34sel = value;
+            break;
+            
+        case 0x2125: // WOBJSEL - Window Mask Settings for OBJ and Color Window
+            m_wobjsel = value;
+            break;
+            
+        case 0x2126: // WH0 - Window 1 Left Position
+            m_wh0 = value;
+            break;
+            
+        case 0x2127: // WH1 - Window 1 Right Position
+            m_wh1 = value;
+            break;
+            
+        case 0x2128: // WH2 - Window 2 Left Position
+            m_wh2 = value;
+            break;
+            
+        case 0x2129: // WH3 - Window 2 Right Position
+            m_wh3 = value;
+            break;
+            
+        case 0x212A: // WBGLOG - Window Mask Logic for BGs
+            m_wbglog = value;
+            break;
+            
+        case 0x212B: // WOBJLOG - Window Mask Logic for OBJs
+            m_wobjlog = value;
             break;
             
         case 0x212E: // TMW - Window Mask for Main Screen
+            m_tmw = value;
+            break;
+            
         case 0x212F: // TSW - Window Mask for Sub Screen
-        case 0x2123: // W12SEL - Window Mask Settings for BG1 and BG2
-        case 0x2124: // W34SEL - Window Mask Settings for BG3 and BG4
-        case 0x2125: // WOBJSEL - Window Mask Settings for OBJ and Color Window
-        case 0x2126: // WH0 - Window 1 Left Position
-        case 0x2127: // WH1 - Window 1 Right Position
-        case 0x2128: // WH2 - Window 2 Left Position
-        case 0x2129: // WH3 - Window 2 Right Position
-        case 0x212A: // WBGLOG - Window Mask Logic for BGs
-        case 0x212B: // WOBJLOG - Window Mask Logic for OBJs
-            // Ignore window settings for now
+            m_tsw = value;
             break;
             
         case 0x2130: // CGWSEL - Color Math Control
+            m_cgws = value;
+            break;
+            
         case 0x2131: // CGADSUB - Color Math Settings
-            m_colorMath = value;
+            m_cgadsub = value;
             break;
             
         case 0x2132: // COLDATA - Fixed Color Data
@@ -938,11 +1658,74 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
 
 uint8_t PPU::readRegister(uint16_t address) {
     switch (address) {
-        case 0x2137: // SLHV - Software Latch for H/V Counter
+        case 0x2137: { // SLHV - Software Latch for H/V Counter
+            // Latch current H/V counter values
+            m_latchedH = m_dot;
+            m_latchedV = m_scanline;
+            m_hvLatchRead = false;
+            m_hvLatchHRead = false;
+            m_hvLatchVRead = false;
             return 0;
+        }
             
-        case 0x213F: // STAT78 - PPU Status Flag and Version
-            return 0x01; // Version 1
+        case 0x213C: { // OPHCT - Horizontal Counter (Low/High)
+            // First read: return low byte of latched horizontal counter
+            // Second read: return high byte (bit 8 only)
+            if (!m_hvLatchHRead) {
+                // First read: return low byte
+                m_hvLatchHRead = true;
+                m_hvLatchRead = true;
+                return m_latchedH & 0xFF;
+            } else {
+                // Second read: return high byte (bit 8 only)
+                m_hvLatchHRead = false;
+                return (m_latchedH >> 8) & 0x01;
+            }
+        }
+        
+        case 0x213D: { // OPVCT - Vertical Counter (Low/High)
+            // First read: return low byte of latched vertical counter
+            // Second read: return high byte (bit 8 only)
+            if (!m_hvLatchVRead) {
+                // First read: return low byte
+                m_hvLatchVRead = true;
+                m_hvLatchRead = true;
+                return m_latchedV & 0xFF;
+            } else {
+                // Second read: return high byte (bit 8 only)
+                m_hvLatchVRead = false;
+                return (m_latchedV >> 8) & 0x01;
+            }
+        }
+        
+        case 0x213E: { // OPHCTH/OPVCTH - H/V Counter High (alternate read)
+            // This is read after $213C or $213D
+            // Return high byte of the last read counter
+            // If H was last read, return H high byte
+            // If V was last read, return V high byte
+            if (m_hvLatchHRead) {
+                // H was last read, return H high byte
+                m_hvLatchHRead = false;
+                return (m_latchedH >> 8) & 0x01;
+            } else if (m_hvLatchVRead) {
+                // V was last read, return V high byte
+                m_hvLatchVRead = false;
+                return (m_latchedV >> 8) & 0x01;
+            }
+            return 0;
+        }
+            
+        case 0x213F: { // STAT78 - PPU Status Flag and Version
+            // Bit 0: PPU version (0 = version 1, 1 = version 2)
+            // Bit 6: Interlace field (0 = odd field, 1 = even field)
+            // Bit 7: PPU2 latch flag (0 = not latched, 1 = latched)
+            uint8_t result = 0x01; // Version 1, odd field, not latched
+            // If H/V latch was just read, set bit 7
+            if (m_hvLatchRead) {
+                result |= 0x80;
+            }
+            return result;
+        }
             
         case 0x2139: { // VMDATALREAD - VRAM Data Read (low byte)
             // VRAM read has a prefetch buffer - first read loads buffer, subsequent reads return buffered value
@@ -970,10 +1753,45 @@ uint8_t PPU::readRegister(uint16_t address) {
             // Bit 7: NMI flag (cleared on read)
             // Bits 0-3: CPU version
             uint8_t result = 0x02;  // CPU version 2
-            if (m_nmiFlag) {
-                result |= 0x80;  // Set NMI flag
-                m_nmiFlag = false;  // Clear on read
+            
+            // SNES RDNMI behavior:
+            // - Bit 7 is set when VBlank occurs (scanline 225)
+            // - Reading RDNMI clears the flag, BUT:
+            //   - If we're still in VBlank period (scanlines 225-261), bit 7 should remain set
+            //   - This allows wait loops to detect VBlank period
+            // - The flag is cleared when VBlank ends (scanline >= 262)
+            
+            bool inVBlank = (m_scanline >= 225 && m_scanline < 262);
+            
+            // Set bit 7 if we're in VBlank period OR if the flag was previously set
+            // The flag persists during the entire VBlank period even after reads
+            if (inVBlank || m_nmiFlag) {
+                result |= 0x80;
             }
+            
+            // RDNMI read logging removed to reduce log spam
+            // VBlank state changes are logged in cpu.cpp via RDNMI-VBLANK and RDNMI-VBLANK-END
+            
+            // Clear the stored flag on read ONLY if we're outside VBlank period
+            // If we're still in VBlank, keep the flag set so subsequent reads also return bit 7 = 1
+            if (!inVBlank) {
+                m_nmiFlag = false;
+            }
+            // Record to history ring buffer
+            m_rdnmiHistory[m_rdnmiHistoryIndex] = result;
+            m_rdnmiHistoryIndex = (m_rdnmiHistoryIndex + 1) % RDNMI_HISTORY_SIZE;
+            // Build printable string lazily (hex bytes newest last)
+            int pos = 0;
+            for (int i = 0; i < RDNMI_HISTORY_SIZE; ++i) {
+                int idx = (m_rdnmiHistoryIndex + i) % RDNMI_HISTORY_SIZE;
+                uint8_t v = m_rdnmiHistory[idx];
+                int written = snprintf(m_rdnmiHistoryStr + pos, sizeof(m_rdnmiHistoryStr) - pos, "%s%02X",
+                                       (i == 0 ? "" : " "), v);
+                if (written < 0) break;
+                pos += written;
+                if (pos >= (int)sizeof(m_rdnmiHistoryStr) - 1) break;
+            }
+            m_rdnmiHistoryStr[sizeof(m_rdnmiHistoryStr) - 1] = '\0';
             return result;
         }
             
@@ -982,9 +1800,21 @@ uint8_t PPU::readRegister(uint16_t address) {
     }
 }
 
+const char* PPU::getRDNMIHistoryString() {
+    return m_rdnmiHistoryStr;
+}
+
 void PPU::writeVRAM(uint16_t address, uint8_t value) {
     if (address < m_vram.size()) {
         m_vram[address] = value;
+        
+        #ifdef ENABLE_LOGGING
+        // Log VRAM writes for debugging
+        std::ostringstream oss;
+        oss << "VRAM Write: [0x" << std::hex << std::setfill('0') << std::setw(4) << address 
+            << "] = 0x" << std::setw(2) << (int)value;
+        Logger::getInstance().logPPU(oss.str());
+        #endif
     }
 }
 
@@ -1012,9 +1842,21 @@ uint32_t PPU::renderSprites(int x, int y) {
     // Each sprite is 4 bytes: X, Y, Tile, Attributes
     // 128 sprites maximum, 32 sprites per scanline maximum
     
-    // For now, implement a simple sprite rendering
-    // Check all sprites to see if any are at this pixel position
+    // Extract sprite size settings from OBSEL register
+    uint8_t spriteSize = (m_objSize >> 5) & 0x03; // Bits 5-6
+    uint8_t nameBase = (m_objSize & 0x07) << 12;  // Bits 0-2, shifted to get base address
     
+    // Determine sprite dimensions based on size setting
+    int spriteWidth, spriteHeight;
+    switch (spriteSize) {
+        case 0: spriteWidth = 8;  spriteHeight = 8;  break;  // Small
+        case 1: spriteWidth = 8;  spriteHeight = 16; break;  // Small + Large
+        case 2: spriteWidth = 8;  spriteHeight = 32; break;  // Small + Large + Large
+        case 3: spriteWidth = 16; spriteHeight = 32; break;  // Large + Large + Large
+        default: spriteWidth = 8; spriteHeight = 8; break;
+    }
+    
+    // Check all sprites to see if any are at this pixel position
     for (int sprite = 0; sprite < 128; sprite++) {
         int oamAddr = sprite * 4;
         
@@ -1028,11 +1870,6 @@ uint32_t PPU::renderSprites(int x, int y) {
         
         // Skip if sprite is not visible (Y = 0 or Y > 224)
         if (spriteY == 0 || spriteY > 224) continue;
-        
-        // Check if this pixel is within the sprite bounds
-        // SNES sprites are typically 8x8 or 16x16 pixels
-        int spriteWidth = 8;  // Default 8x8
-        int spriteHeight = 8;
         
         // Check if sprite is on this scanline
         if (y >= spriteY && y < spriteY + spriteHeight) {
@@ -1052,8 +1889,23 @@ uint32_t PPU::renderSprites(int x, int y) {
                     pixelY = spriteHeight - 1 - pixelY;
                 }
                 
-                // Get tile data address (simplified - assume tiles start at 0x0000)
-                uint16_t tileAddr = tileNumber * 32; // 32 bytes per 8x8 tile
+                // Calculate tile number based on sprite size
+                int tileX = pixelX / 8;
+                int tileY = pixelY / 8;
+                int tilePixelX = pixelX % 8;
+                int tilePixelY = pixelY % 8;
+                
+                // Calculate actual tile number for multi-tile sprites
+                uint16_t actualTileNumber = tileNumber;
+                if (spriteWidth > 8) {
+                    actualTileNumber += tileX;
+                }
+                if (spriteHeight > 8) {
+                    actualTileNumber += tileY * (spriteWidth / 8);
+                }
+                
+                // Get tile data address using name base
+                uint16_t tileAddr = nameBase + actualTileNumber * 32; // 32 bytes per 8x8 tile
                 
                 if (tileAddr + 32 <= m_vram.size()) {
                     // Decode tile
@@ -1065,7 +1917,7 @@ uint32_t PPU::renderSprites(int x, int y) {
                     uint8_t pixels[64];
                     decodeTile(tileData, pixels, 4);
                     
-                    uint8_t pixelIndex = pixels[pixelY * 8 + pixelX];
+                    uint8_t pixelIndex = pixels[tilePixelY * 8 + tilePixelX];
                     if (pixelIndex != 0) { // Not transparent
                         // Use palette 8-15 for sprites (palette 0-7 are for backgrounds)
                         uint8_t palette = 8 + ((attributes >> 1) & 0x07);
@@ -1077,6 +1929,127 @@ uint32_t PPU::renderSprites(int x, int y) {
     }
     
     return 0; // No sprite pixel at this position
+}
+
+// Render sprite pixel with priority information
+PixelInfo PPU::renderSpritePixel(int x, int y) {
+    // SNES OAM structure and extended OAM
+    // Each sprite has priority information in extended OAM
+    // For now, return priority 2 for sprites (between BG priorities)
+    
+    uint32_t spriteColor = renderSprites(x, y);
+    if (spriteColor != 0) {
+        // Sprites typically have priority 2-3
+        // Priority is determined by sprite number (lower number = higher priority)
+        // and extended OAM attributes
+        return {spriteColor, 2}; // Default sprite priority
+    }
+    
+    return {0, 0}; // No sprite
+}
+
+// Check if window masking applies to this pixel
+bool PPU::isWindowEnabled(int x, int bgIndex, bool isSprite) {
+    // Window settings are complex - simplified version
+    // Full implementation needs to check window 1 and window 2 settings
+    // for each layer based on W12SEL, W34SEL, WOBJSEL
+    
+    // For now, return false (no window masking)
+    // TODO: Implement full window logic
+    (void)x;
+    (void)bgIndex;
+    (void)isSprite;
+    return false;
+}
+
+// Check window mask based on window settings
+bool PPU::checkWindowMask(int x, uint8_t windowSettings) {
+    // Simplified window check
+    // Window 1: if x is within [WH0, WH1), window is active based on bits 0-1
+    // Window 2: if x is within [WH2, WH3), window is active based on bits 4-5
+    // Logic: bits 2-3 (window 1), bits 6-7 (window 2)
+    
+    bool inWindow1 = (x >= m_wh0 && x < m_wh1);
+    bool inWindow2 = (x >= m_wh2 && x < m_wh3);
+    
+    // Window settings: bits 0-1 = Window 1, bits 4-5 = Window 2
+    bool window1Enable = (windowSettings & 0x03) != 0;
+    bool window2Enable = ((windowSettings >> 4) & 0x03) != 0;
+    
+    // Combine windows based on logic
+    bool result = false;
+    if (window1Enable && inWindow1) {
+        result = true;
+    }
+    if (window2Enable && inWindow2) {
+        // Window logic: OR or AND based on settings
+        result = true; // Simplified
+    }
+    
+    return result;
+}
+
+// Render Sub Screen
+uint32_t PPU::renderSubScreen(int x) {
+    int y = m_scanline;
+    
+    // Sub Screen uses same background layers but different designation
+    // For now, render same as main screen
+    // TODO: Implement proper sub screen rendering with different settings
+    
+    if (m_bgMode == 0) {
+        return renderBackgroundMode0(x);
+    } else if (m_bgMode == 1) {
+        return renderBackgroundMode1(x);
+    }
+    
+    return 0xFF000000; // Black
+}
+
+// Apply Color Math (Add/Sub mode)
+uint32_t PPU::applyColorMath(uint32_t mainColor, uint32_t subColor) {
+    // Color Math modes:
+    // CGWS bit 0-1: Math mode
+    // CGADSUB: Controls which layers participate and add/subtract mode
+    
+    if ((m_cgws & 0x03) == 0) {
+        // Math disabled
+        return mainColor;
+    }
+    
+    // Extract RGB components
+    uint8_t mainR = (mainColor & 0xFF);
+    uint8_t mainG = ((mainColor >> 8) & 0xFF);
+    uint8_t mainB = ((mainColor >> 16) & 0xFF);
+    
+    uint8_t subR = (subColor & 0xFF);
+    uint8_t subG = ((subColor >> 8) & 0xFF);
+    uint8_t subB = ((subColor >> 16) & 0xFF);
+    
+    uint8_t finalR, finalG, finalB;
+    
+    bool subtractMode = (m_cgadsub & 0x80) != 0;
+    
+    if (subtractMode) {
+        // Subtract: Main - Sub
+        finalR = (mainR > subR) ? (mainR - subR) : 0;
+        finalG = (mainG > subG) ? (mainG - subG) : 0;
+        finalB = (mainB > subB) ? (mainB - subB) : 0;
+    } else {
+        // Add: Main + Sub (clamped to 255)
+        finalR = (mainR + subR > 255) ? 255 : (mainR + subR);
+        finalG = (mainG + subG > 255) ? 255 : (mainG + subG);
+        finalB = (mainB + subB > 255) ? 255 : (mainB + subB);
+    }
+    
+    // Half brightness mode (bit 0 of CGWS)
+    if ((m_cgws & 0x01) != 0) {
+        finalR = (finalR * mainR) / 256;
+        finalG = (finalG * mainG) / 256;
+        finalB = (finalB * mainB) / 256;
+    }
+    
+    return (0xFF << 24) | (finalB << 16) | (finalG << 8) | finalR;
 }
 
 void PPU::incrementVRAMAddress() {
@@ -1093,27 +2066,47 @@ void PPU::incrementVRAMAddress() {
     m_vramAddress += increment;
     
     // Wrap around at 64KB boundary
-    if (m_vramAddress >= 0x10000) {
+    if (m_vramAddress >= 65536) {
         m_vramAddress &= 0xFFFF;
     }
 }
 
 void PPU::loadROMData(const std::vector<uint8_t>& romData) {
-    std::cout << "Loading ROM data into VRAM..." << std::endl;
-    std::cout << "ROM size: " << romData.size() << " bytes" << std::endl;
-    std::cout << "VRAM size: " << m_vram.size() << " bytes" << std::endl;
+    std::ostringstream oss;
+    oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+        << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+        << "PPU: Loading ROM data into VRAM..." << std::endl;
+    Logger::getInstance().logPPU(oss.str());
+    Logger::getInstance().flush();
+    oss.str("");
+    oss.clear();
+    oss << "ROM size: " << romData.size() << " bytes" << std::endl;
+    Logger::getInstance().logPPU(oss.str());
     
     // DO NOT copy ROM into VRAM automatically!
     // VRAM should only be written by CPU through DMA or direct writes to $2118/2119
     // The ROM data will be loaded by the game's initialization code via DMA
-    std::cout << "VRAM initialized to zero, waiting for CPU to load graphics via DMA" << std::endl;
+    oss.str("");
+    oss.clear();
+    oss << "VRAM initialized to zero, waiting for CPU to load graphics via DMA" << std::endl;
+    Logger::getInstance().logPPU(oss.str());
+    Logger::getInstance().flush();
     
     // Verify first few bytes
-    std::cout << "First 16 VRAM bytes: ";
+    oss.str("");
+    oss.clear();
+    oss << "First 16 VRAM bytes: ";
     for (int i = 0; i < 16; i++) {
-        std::cout << std::hex << (int)m_vram[i] << " ";
+        oss << std::hex << (int)m_vram[i] << " ";
     }
-    std::cout << std::dec << std::endl;
+    oss << std::dec << std::endl;
+    Logger::getInstance().logPPU(oss.str());
+    oss.str("");
+    for (int i = 0; i < 16; i++) {
+        oss << std::hex << (int)m_vram[i] << " ";
+    }
+    oss << std::dec << std::endl;
+    Logger::getInstance().logPPU(oss.str());
     
     // Initialize CGRAM with some test colors
     for (int i = 0; i < 256; i++) {
@@ -1144,5 +2137,9 @@ void PPU::loadROMData(const std::vector<uint8_t>& romData) {
         m_cgram[i * 2 + 1] = (color >> 8) & 0xFF;
     }
     
-    std::cout << "Initialized CGRAM with test colors" << std::endl;
+    oss.str("");
+    oss.clear();
+    oss << "Initialized CGRAM with test colors" << std::endl;
+    Logger::getInstance().logPPU(oss.str());
+    Logger::getInstance().flush();
 }
