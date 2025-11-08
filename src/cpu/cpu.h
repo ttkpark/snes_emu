@@ -31,6 +31,7 @@ public:
     void setLogSuppression(bool enabled) { m_suppressLogging = enabled; }
     bool shouldSuppressLogging() const { return m_suppressLogging; }
     
+    bool m_quitEmulation;
 private:
     Memory* m_memory;
     PPU* m_ppu;
@@ -38,7 +39,7 @@ private:
     uint16_t m_a;       // Accumulator
     uint16_t m_x, m_y;  // Index registers
     uint16_t m_sp;      // Stack Pointer (16-bit for Native Mode, 8-bit for Emulation Mode)
-    uint8_t m_p;        // Status flags
+    volatile uint8_t m_p;        // Status flags
     uint64_t m_cycles;
     
     // Interrupt flags
@@ -58,9 +59,21 @@ private:
     // Logging control
     bool m_suppressLogging;
     
+    // Infinite loop detection
+    uint32_t m_lastPC;        // Last PC address (full address: PBR + PC)
+    uint32_t m_loopCount;      // Number of times same PC was executed
+    static const uint32_t MAX_LOOP_COUNT = 10000;  // Threshold for infinite loop detection
+    
+    // Short loop detection (for loops between 2-3 instructions)
+    static const uint32_t LOOP_HISTORY_SIZE = 10;  // Track last 10 PCs
+    uint32_t m_pcHistory[LOOP_HISTORY_SIZE];  // History of recent PCs
+    uint32_t m_historyIndex;  // Current index in history
+    uint32_t m_shortLoopCount;  // Count for short loop detection
+    
     void executeInstruction(uint8_t opcode);
     void handleNMI();
     void updateModeFlags();  // Update M, X flags from P register
+    void dumpMemory();       // Dump memory for debugging infinite loops
     
     // Flag status test functions
     bool isCarry() const { return (m_p & 0x01) != 0; }

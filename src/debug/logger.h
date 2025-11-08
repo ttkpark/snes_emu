@@ -5,7 +5,7 @@
 #include <deque>
 
 // Define to enable logging (comment out to disable for performance)
-#define ENABLE_LOGGING  // Disabled for performance
+#define ENABLE_LOGGING  // Enabled - CPU trace disabled separately
 
 class Logger {
 public:
@@ -20,6 +20,7 @@ public:
     
     void flush();
     void setMaxEntries(int max) { m_maxEntries = max; }
+    void setMaxLines(int max) { m_maxLines = max; }
     void setLoggingEnabled(bool enabled) { m_loggingEnabled = enabled; }
     bool isLoggingEnabled() const { return m_loggingEnabled; }
     
@@ -45,6 +46,10 @@ private:
     std::mutex m_ppuMutex;
     
     int m_maxEntries;
+    int m_maxLines;  // Maximum lines per log file before truncating
+    int m_cpuLineCount;
+    int m_apuLineCount;
+    int m_ppuLineCount;
     bool m_loggingEnabled;
 };
 

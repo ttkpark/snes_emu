@@ -8,6 +8,12 @@
 class Memory;
 class CPU;
 
+// Rendered pixel information (color and priority)
+struct PixelInfo {
+    uint32_t color;    // RGBA color
+    uint8_t priority;  // Priority (0-3, higher is more important)
+};
+
 class PPU {
 public:
     PPU();
@@ -48,6 +54,11 @@ public:
     void clearFrameReady() { m_frameReady = false; }
     
     int getScanline() const { return m_scanline; }
+    bool isNMIEnabled() const { return m_nmiEnabled; }
+    bool isForcedBlank() const { return m_forcedBlank; }
+    uint8_t getBrightness() const { return m_brightness; }
+    // Diagnostic: recent reads of RDNMI ($4210)
+    const char* getRDNMIHistoryString();
     
     // Screen dimensions
     static const int SCREEN_WIDTH = 256;
@@ -65,7 +76,20 @@ private:
     bool m_nmiEnabled;      // NMITIMEN register (0x4200)
     bool m_nmiFlag;         // RDNMI register (0x4210)
     
-    // BG tile/tilemap addresses
+    // H/V Counter latch
+    uint16_t m_latchedH;   // Latched horizontal counter (dot position)
+    uint16_t m_latchedV;   // Latched vertical counter (scanline)
+    bool m_hvLatchRead;    // Whether H/V latch has been read (for $213C/$213D)
+    bool m_hvLatchHRead;   // Whether H counter low byte has been read
+    bool m_hvLatchVRead;   // Whether V counter low byte has been read
+    // Ring buffer to store recent RDNMI read values for diagnostics
+    static const int RDNMI_HISTORY_SIZE = 64;
+    uint8_t m_rdnmiHistory[RDNMI_HISTORY_SIZE] = {0};
+    int m_rdnmiHistoryIndex = 0;
+    // Cached printable buffer for quick logging
+    char m_rdnmiHistoryStr[3 * RDNMI_HISTORY_SIZE + 1] = {0};
+    
+    // BG tile/tilemap addresses (individual variables)
     uint16_t m_bg1TileAddr;
     uint16_t m_bg1MapAddr;
     uint16_t m_bg2TileAddr;
@@ -74,6 +98,22 @@ private:
     uint16_t m_bg3MapAddr;
     uint16_t m_bg4TileAddr;
     uint16_t m_bg4MapAddr;
+    
+    // BG tile/tilemap addresses (array form, used in renderBGx)
+    uint16_t m_bgMapAddr[4];   // Tilemap addresses for BG1-4
+    uint16_t m_bgTileAddr[4];  // Tile data addresses for BG1-4
+    
+    // BG tilemap size settings (from BGSC registers, bit 7)
+    // 0 = 32x32 tiles, 1 = 64x64 tiles
+    bool m_bgMapSize[4];  // Tilemap size for BG1-4
+    
+    // Mosaic settings
+    uint8_t m_mosaicSize;      // Mosaic size (bits 0-3 of $2106)
+    bool m_mosaicEnabled[4];   // Mosaic enable for each BG (bits 4-7 of $2106)
+    
+    // BG priority settings [bgIndex][priorityGroup]
+    // priorityGroup: 0=low priority, 1=high priority
+    uint8_t m_bgPriority[4][2];
     
     // BG scroll registers ($210D-$2114)
     uint16_t m_bg1ScrollX;
@@ -95,6 +135,21 @@ private:
     uint8_t m_mainScreenDesignation;
     uint8_t m_subScreenDesignation;
     uint8_t m_colorMath;
+    
+    // Window settings
+    uint8_t m_w12sel;      // Window settings for BG1/BG2 ($2123)
+    uint8_t m_w34sel;      // Window settings for BG3/BG4 ($2124)
+    uint8_t m_wobjsel;     // Window settings for OBJ ($2125)
+    uint16_t m_wh0, m_wh1; // Window 1 left/right ($2126-$2127)
+    uint16_t m_wh2, m_wh3; // Window 2 left/right ($2128-$2129)
+    uint8_t m_wbglog;      // Window mask logic for BGs ($212A)
+    uint8_t m_wobjlog;     // Window mask logic for OBJ ($212B)
+    uint8_t m_tmw;         // Window mask for main screen ($212E)
+    uint8_t m_tsw;         // Window mask for sub screen ($212F)
+    
+    // Color Math settings
+    uint8_t m_cgws;        // Color Math control ($2130)
+    uint8_t m_cgadsub;     // Color Math settings ($2131)
     
     // Sprite settings ($2101)
     uint8_t m_objSize;      // Sprite size and name base
@@ -138,9 +193,24 @@ private:
     uint32_t renderBG2(int x, int y);
     uint32_t renderBG3(int x, int y);
     uint32_t renderBG4(int x, int y);
+    PixelInfo renderBG3Pixel(int x, int y);
+    PixelInfo renderBG4Pixel(int x, int y);
     uint32_t renderSprites(int x, int y);
+    PixelInfo renderSpritePixel(int x, int y);  // Returns sprite pixel with priority
     uint32_t getColor(uint8_t paletteIndex, uint8_t colorIndex);
+    uint32_t getColor(uint8_t paletteIndex, uint8_t colorIndex, int bpp);
     void decodeTile(const uint8_t* tileData, uint8_t output[64], int bpp);
+    
+    // BG layer rendering (unified function)
+    PixelInfo renderBGx(int bgIndex, int tileX, int tileY, int pixelX, int pixelY);
+    
+    // Window functions
+    bool isWindowEnabled(int x, int bgIndex, bool isSprite);
+    bool checkWindowMask(int x, uint8_t windowSettings);
+    
+    // Sub Screen and Color Math
+    uint32_t renderSubScreen(int x);
+    uint32_t applyColorMath(uint32_t mainColor, uint32_t subColor);
     
     // Helper functions
     uint16_t getVRAMIncrementSize() const;

@@ -74,6 +74,20 @@ private:
     int m_bootStep;
     int m_spc700Cycles;  // Cycle counter for accurate timing
     
+    // SPC Program Load State
+    enum SPCLoadState {
+        SPC_LOAD_IDLE,
+        SPC_LOAD_WAIT_BBAA,
+        SPC_LOAD_WAIT_CC,
+        SPC_LOAD_RECEIVING,
+        SPC_LOAD_WAIT_EXEC,
+        SPC_LOAD_COMPLETE
+    } m_spcLoadState;
+    uint16_t m_spcLoadAddr;      // Destination address for SPC program
+    uint16_t m_spcLoadSize;      // Size of SPC program being loaded
+    uint16_t m_spcLoadIndex;     // Current byte index being loaded
+    uint16_t m_spcExecAddr;      // Execution address for SPC program
+    
     // Timers (3 timers) - Timer 0/1: 8kHz, Timer 2: 64kHz
     struct Timer {
         uint8_t counter;    // 4-bit counter (0-15)
@@ -118,6 +132,13 @@ private:
         uint8_t brrNibblePos;       // Current nibble position (0-15)
         uint8_t brrHeader;          // Current BRR block header
         
+        // Pitch and sample playback state
+        uint16_t pitch;             // Current pitch value (14-bit: PITCH H[6:0] + PITCH L[7:0])
+        uint32_t samplePos;         // Fixed-point sample position (16.16 format)
+        uint32_t sampleStep;        // Fixed-point step per output sample (16.16 format)
+        int16_t brrBuffer[16];      // BRR decoded sample buffer for interpolation
+        uint8_t brrBufferIndex;     // Current position in BRR buffer
+        
         // ADSR/Gain envelope state
         EnvelopeState envState;
         uint16_t envLevel;          // Envelope level (0x0000-0x7FFF)
@@ -128,9 +149,11 @@ private:
             : enabled(false), volume(0), frequency(0), waveform(0), phase(0)
             , currentSample(0), sourceAddr(0), currentAddr(0)
             , brrBytePos(0), brrNibblePos(0), brrHeader(0)
+            , pitch(0), samplePos(0), sampleStep(0), brrBufferIndex(0)
             , envState(ENV_DIRECT), envLevel(0), sustainLevel(0), keyOn(false) {
             samplePrev[0] = 0;
             samplePrev[1] = 0;
+            for (int i = 0; i < 16; i++) brrBuffer[i] = 0;
         }
     } m_channels[8]; // 8 audio channels
     
@@ -166,6 +189,10 @@ private:
     // BRR and Envelope functions
     int16_t decodeBRR(int channel);
     void updateEnvelopeAndPitch(int channel);
+    int16_t getSampleWithPitch(int channel);
+    
+    // DSP register handling
+    void handleDSPRegisterWrite(uint8_t addr, uint8_t value, uint8_t oldValue);
     
     // SPC700 helper functions
     void setFlag(uint8_t flag, bool value);
