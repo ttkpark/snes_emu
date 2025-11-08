@@ -1,3 +1,5 @@
 === APU (SPC700) Execution Trace ===
 Format: [Frame] PC | Opcode | A | X | Y | SP | PSW | Instruction
 ========================================
+[Cyc:0000000001] SPC700 PC:0xffc0 | 8f aa f4    | MOV dp,#imm          | operand=0xf4aa | A:0x00 | X:0x00 | Y:0x00 | SP:0xff | PSW:0x02
+[Cyc:0000000002] SPC700 PC:0xffc3 | 8f bb f5    | MOV dp,#imm          | operand=0xf5bb | A:0x00 | X:0x00 | Y:0x00 | SP:0xff | PSW:0x02
