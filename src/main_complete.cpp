@@ -60,6 +60,13 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
+    // Check for cycle limit argument
+    int cycleLimit = -1; // -1 means no limit
+    if (argc > 2) {
+        cycleLimit = std::atoi(argv[2]);
+        std::cout << "Cycle limit set to: " << cycleLimit << std::endl;
+    }
+    
     // Load ROM
     std::string romPath = "spctest.sfc";
     if (argc > 1) {
@@ -532,32 +539,23 @@ int main(int argc, char* argv[]) {
     ppu.writeRegister(0x2127, 0x00); // WH1: Window 1 right position
     ppu.writeRegister(0x2128, 0x00); // WH2: Window 2 left position
     ppu.writeRegister(0x2129, 0x00); // WH3: Window 2 right position
-    ppu.writeRegister(0x212A, 0x00); // WH4: Window 3 left position
-    ppu.writeRegister(0x212B, 0x00); // WH5: Window 3 right position
-    ppu.writeRegister(0x212C, 0x00); // WH6: Window 4 left position
-    ppu.writeRegister(0x212D, 0x00); // WH7: Window 4 right position
-    ppu.writeRegister(0x212E, 0x00); // WH8: Window 5 left position
-    ppu.writeRegister(0x212F, 0x00); // WH9: Window 5 right position
-    ppu.writeRegister(0x2130, 0x00); // WHA: Window 6 left position
-    ppu.writeRegister(0x2131, 0x00); // WHB: Window 6 right position
-    ppu.writeRegister(0x2132, 0x00); // WHC: Window 7 left position
-    ppu.writeRegister(0x2133, 0x00); // WHD: Window 7 right position
-    ppu.writeRegister(0x2134, 0x00); // WHE: Window 8 left position
-    ppu.writeRegister(0x2135, 0x00); // WHF: Window 8 right position
-    ppu.writeRegister(0x2136, 0x00); // TM: Main screen designation
-    ppu.writeRegister(0x2137, 0x00); // TS: Sub screen designation
-    ppu.writeRegister(0x2138, 0x00); // TMW: Window mask main screen
-    ppu.writeRegister(0x2139, 0x00); // TSW: Window mask sub screen
-    ppu.writeRegister(0x213A, 0x00); // TMW: Window mask main screen
-    ppu.writeRegister(0x213B, 0x00); // TSW: Window mask sub screen
-    ppu.writeRegister(0x213C, 0x00); // TMW: Window mask main screen
-    ppu.writeRegister(0x213D, 0x00); // TSW: Window mask sub screen
-    ppu.writeRegister(0x213E, 0x00); // TMW: Window mask main screen
-    ppu.writeRegister(0x213F, 0x00); // TSW: Window mask sub screen
-    ppu.writeRegister(0x2140, 0x00); // CGWSEL: Color math settings
-    ppu.writeRegister(0x2141, 0x00); // CGADSUB: Color math settings
-    ppu.writeRegister(0x2142, 0x00); // COLDATA: Color math settings
-    ppu.writeRegister(0x2143, 0x00); // SETINI: Screen mode/color settings
+    ppu.writeRegister(0x212A, 0x00); // WBGLOG: Window mask logic for BGs
+    ppu.writeRegister(0x212B, 0x00); // WOBJLOG: Window mask logic for OBJs
+    ppu.writeRegister(0x212C, 0x00); // TM: Main screen designation
+    ppu.writeRegister(0x212D, 0x00); // TS: Sub screen designation
+    ppu.writeRegister(0x212E, 0x00); // TMW: Window mask main screen
+    ppu.writeRegister(0x212F, 0x00); // TSW: Window mask sub screen
+    ppu.writeRegister(0x2130, 0x00); // CGWSEL: Color math settings
+    ppu.writeRegister(0x2131, 0x00); // CGADSUB: Color math settings
+    ppu.writeRegister(0x2132, 0x00); // COLDATA: Color math settings
+    ppu.writeRegister(0x2133, 0x00); // SETINI: Screen mode/color settings
+    // Note: 0x2134-0x2135 are read-only (OPHCT/OPVCT)
+    // Note: 0x2136-0x2137 are read-only (STAT77/STAT78)
+    // Note: 0x2138-0x2139 are read-only (OPHCT/OPVCT)
+    // Note: 0x213A-0x213B are read-only (STAT77/STAT78)
+    // Note: 0x213C-0x213D are read-only (OPHCT/OPVCT)
+    // Note: 0x213E-0x213F are read-only (STAT77/STAT78)
+    // Note: 0x2140-0x2143 are APU I/O ports, not PPU registers
     std::cout << "PPU registers initialized." << std::endl;
     
     // Print initial vectors after initialization
@@ -600,6 +598,16 @@ int main(int argc, char* argv[]) {
             break;
         }
         
+        // Process input events
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_QUIT) {
+                running = false;
+            }
+            input.handleEvent(event);
+        }
+        input.update();
+        
         // SNES Hardware Clock Synchronization
         // Master Clock: 21.477272 MHz
         // CPU: Master ÷ 6 = 3.579545 MHz (6 cycles per master)
@@ -633,6 +641,14 @@ int main(int argc, char* argv[]) {
                 break;
             }
             cycleCount++;
+            
+            // Check cycle limit
+            if (cycleLimit > 0 && cycleCount >= cycleLimit) {
+                std::cout << "\n=== CYCLE LIMIT REACHED ===" << std::endl;
+                std::cout << "Stopped at " << cycleCount << " CPU cycles" << std::endl;
+                running = false;
+                break;
+            }
         }
         
         // APU runs every 8 master cycles (2.68MHz)
@@ -660,13 +676,6 @@ int main(int argc, char* argv[]) {
             
             if (frameCount % 60 == 0) {
                 std::cout << "Frame: " << frameCount << ", CPU Cycles: " << cpu.getCycles() << std::endl;
-            }
-
-            while (SDL_PollEvent(&event)) {
-                if (event.type == SDL_QUIT) {
-                    running = false;
-                }
-                input.update();
             }
         }
         

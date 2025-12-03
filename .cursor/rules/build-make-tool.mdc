@@ -65,3 +65,45 @@ SNES 에뮬레이터를 만드는 것이 목표입니다. 완전한 SNES 하드�
 - APU trace 로그 (`apu_trace.log`) 분석하여 SPC700 실행 흐름 추적
 - CPU-APU 포트 통신 검증 중
 - SPC700 명령어 실행 및 플래그 처리 검증 중 
+
+
+프로그램 실행 시 `.\snes_emu_complete.exe spctest.sfc`로 실행하고, 백그라운드 실행 시 `Start-Process`를 사용해.
+
+## 프로그램 종료 확인 방법
+
+프로그램이 끝났는지 확인하는 방법:
+
+### 1. 프로세스 확인
+```powershell
+$process = Get-Process -Name "snes_emu_complete" -ErrorAction SilentlyContinue
+if ($process) { "실행 중" } else { "종료됨" }
+```
+
+### 2. 로그 파일 업데이트 확인
+```powershell
+$lastSize = (Get-Item "apu_trace.log").Length
+Start-Sleep -Seconds 3
+$newSize = (Get-Item "apu_trace.log").Length
+if ($newSize -eq $lastSize) { "멈춤" } else { "실행 중" }
+```
+
+### 3. 표준 출력 메시지
+프로그램 종료 시 다음 메시지 출력:
+- `"Emulation finished."`
+- `"Total CPU instructions executed: <숫자>"`
+- 테스트 실패 시: `"=== SPC TEST FAILED - Reached final loop ==="`
+
+### 4. 포트 2 값 확인
+```powershell
+$lastPort2 = Select-String -Path "apu_trace.log" -Pattern "wrote port 2 = 0x" | Select-Object -Last 1
+```
+- `0x2`: 테스트 실패
+- `0x3`: fail 루틴 진입
+- `0xf3` 등: 테스트 진행 중 (테스트 번호)
+
+## 종료 판단 기준
+프로그램이 종료된 것으로 판단:
+1. 프로세스가 종료됨
+2. "Emulation finished." 메시지 출력
+3. 로그 파일이 3초 이상 업데이트되지 않음
+4. 포트 2 값이 0x2 또는 0x3으로 설정됨

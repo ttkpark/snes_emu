@@ -1,0 +1,46 @@
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.21
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+Microsoft (R) C/C++ 최적화 컴파일러 버전 19.44.35221(x64)
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+main_complete.cpp
+C:\Users\GH\Desktop\snes_emu\src\debug/logger.h(8): warning C4005: 'ENABLE_LOGGING': 매크로 재정의
+C:\Users\GH\Desktop\snes_emu\src\debug/logger.h(8): note: 이전에 명령줄에서 선언된 'ENABLE_LOGGING'
+cpu.cpp
+C:\Users\GH\Desktop\snes_emu\src\cpu\../debug/logger.h(8): warning C4005: 'ENABLE_LOGGING': 매크로 재정의
+C:\Users\GH\Desktop\snes_emu\src\cpu\../debug/logger.h(8): note: 이전에 명령줄에서 선언된 'ENABLE_LOGGING'
+src\cpu\cpu.cpp(599): warning C4819: 현재 코드 페이지(949)에서 표시할 수 없는 문자가 파일에 들어 있습니다. 데이터가 손실되지 않게 하려면 해당 파일을 유니코드 형식으로 저장하십시오.
+memory.cpp
+C:\Users\GH\Desktop\snes_emu\src\memory\../debug/logger.h(8): warning C4005: 'ENABLE_LOGGING': 매크로 재정의
+C:\Users\GH\Desktop\snes_emu\src\memory\../debug/logger.h(8): note: 이전에 명령줄에서 선언된 'ENABLE_LOGGING'
+ppu.cpp
+src\ppu\ppu.cpp(1): warning C4819: 현재 코드 페이지(949)에서 표시할 수 없는 문자가 파일에 들어 있습니다. 데이터가 손실되지 않게 하려면 해당 파일을 유니코드 형식으로 저장하십시오.
+C:\Users\GH\Desktop\snes_emu\src\ppu\../debug/logger.h(8): warning C4005: 'ENABLE_LOGGING': 매크로 재정의
+C:\Users\GH\Desktop\snes_emu\src\ppu\../debug/logger.h(8): note: 이전에 명령줄에서 선언된 'ENABLE_LOGGING'
+apu.cpp
+C:\Users\GH\Desktop\snes_emu\src\apu\../debug/logger.h(8): warning C4005: 'ENABLE_LOGGING': 매크로 재정의
+C:\Users\GH\Desktop\snes_emu\src\apu\../debug/logger.h(8): note: 이전에 명령줄에서 선언된 'ENABLE_LOGGING'
+src\apu\apu.cpp(2579): warning C4819: 현재 코드 페이지(949)에서 표시할 수 없는 문자가 파일에 들어 있습니다. 데이터가 손실되지 않게 하려면 해당 파일을 유니코드 형식으로 저장하십시오.
+simple_input.cpp
+logger.cpp
+C:\Users\GH\Desktop\snes_emu\src\debug\logger.h(8): warning C4005: 'ENABLE_LOGGING': 매크로 재정의
+C:\Users\GH\Desktop\snes_emu\src\debug\logger.h(8): note: 이전에 명령줄에서 선언된 'ENABLE_LOGGING'
+코드를 생성하고 있습니다...
+Microsoft (R) Incremental Linker Version 14.44.35221.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+/out:snes_emu_complete.exe 
+lib\SDL2.lib 
+lib\SDL2main.lib 
+shell32.lib 
+/SUBSYSTEM:CONSOLE 
+main_complete.obj 
+cpu.obj 
+memory.obj 
+ppu.obj 
+apu.obj 
+simple_input.obj 
+logger.obj 

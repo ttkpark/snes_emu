@@ -62,7 +62,7 @@ private:
     // Infinite loop detection
     uint32_t m_lastPC;        // Last PC address (full address: PBR + PC)
     uint32_t m_loopCount;      // Number of times same PC was executed
-    static const uint32_t MAX_LOOP_COUNT = 10000;  // Threshold for infinite loop detection
+    static const uint32_t MAX_LOOP_COUNT = 1000000;  // Threshold for infinite loop detection
     
     // Short loop detection (for loops between 2-3 instructions)
     static const uint32_t LOOP_HISTORY_SIZE = 10;  // Track last 10 PCs

@@ -5,13 +5,14 @@
 #include <sstream>
 
 Logger::Logger() : m_maxEntries(1000), m_maxLines(50000000), 
-                   m_cpuLineCount(0), m_apuLineCount(0), m_ppuLineCount(0),
+                   m_cpuLineCount(0), m_apuLineCount(0), m_ppuLineCount(0), m_portLineCount(0),
                    m_loggingEnabled(false) {
 #ifdef ENABLE_LOGGING
     m_loggingEnabled = true;
     m_cpuLog.open("cpu_trace.log", std::ios::out | std::ios::trunc);
     m_apuLog.open("apu_trace.log", std::ios::out | std::ios::trunc);
     m_ppuLog.open("ppu_trace.log", std::ios::out | std::ios::trunc);
+    m_portLog.open("port_comm.log", std::ios::out | std::ios::trunc);
     
     if (!m_cpuLog.is_open()) {
         std::cerr << "Failed to open cpu_trace.log" << std::endl;
@@ -21,6 +22,9 @@ Logger::Logger() : m_maxEntries(1000), m_maxLines(50000000),
     }
     if (!m_ppuLog.is_open()) {
         std::cerr << "Failed to open ppu_trace.log" << std::endl;
+    }
+    if (!m_portLog.is_open()) {
+        std::cerr << "Failed to open port_comm.log" << std::endl;
     }
     
     if (m_loggingEnabled) {
@@ -43,6 +47,12 @@ Logger::Logger() : m_maxEntries(1000), m_maxLines(50000000),
             m_ppuLog << "Format: [Frame] Scanline | Event | Details" << std::endl;
             m_ppuLog << "========================================" << std::endl;
         }
+        
+        if (m_portLog.is_open()) {
+            m_portLog << "=== CPU-APU Port Communication Trace ===" << std::endl;
+            m_portLog << "Format: [CPU->APU] or [SPC->CPU] Port X = value | details" << std::endl;
+            m_portLog << "========================================" << std::endl;
+        }
     }
 #endif
 }
@@ -58,6 +68,9 @@ Logger::~Logger() {
     }
     if (m_ppuLog.is_open()) {
         m_ppuLog.close();
+    }
+    if (m_portLog.is_open()) {
+        m_portLog.close();
     }
 }
 
@@ -77,11 +90,11 @@ void Logger::logCPU(const std::string& message) {
         m_cpuLog << message << std::endl;
         m_cpuLineCount++;
         // Truncate CPU log after every 10000 lines to keep only recent activity
-        /*if (m_cpuLineCount-5000 >= 10000) {
-            m_cpuLog.close();
-            m_cpuLog.open("cpu_trace.log", std::ios::out | std::ios::trunc);
+        if (m_cpuLineCount >= 10000) {
+            //m_cpuLog.close();
+            //m_cpuLog.open("cpu_trace.log", std::ios::out | std::ios::trunc);
             m_cpuLineCount = 0;
-        }*/
+        }
     }
 }
 
@@ -99,6 +112,11 @@ void Logger::logAPU(const std::string& message) {
     if (m_apuLog.is_open()) {
         m_apuLog << message << std::endl;
         m_apuLineCount++;
+        if (m_apuLineCount >= 10000) {
+            //m_apuLog.close();
+            //m_apuLog.open("apu_trace.log", std::ios::out | std::ios::trunc);
+            m_apuLineCount = 0;
+        }
     }
 }
 
@@ -116,12 +134,29 @@ void Logger::logPPU(const std::string& message) {
     // Write directly to file for continuous logging
     if (m_ppuLog.is_open()) {
         m_ppuLog << message << std::endl;
-        m_ppuLineCount++;
+        /*m_ppuLineCount++;
         if (m_ppuLineCount >= 10000) {
             m_ppuLog.close();
             m_ppuLog.open("ppu_trace.log", std::ios::out | std::ios::trunc);
             m_ppuLineCount = 0;
-        }
+        }*/
+    }
+}
+
+void Logger::logPort(const std::string& message) {
+    if (!m_loggingEnabled) return;
+    
+    std::lock_guard<std::mutex> lock(m_portMutex);
+    
+    // Stop logging if we've reached the max line count
+    if (m_portLineCount >= m_maxLines) {
+        return;
+    }
+    
+    // Write directly to file for continuous logging
+    if (m_portLog.is_open()) {
+        m_portLog << message << std::endl;
+        m_portLineCount++;
     }
 }
 
@@ -146,6 +181,47 @@ void Logger::flush() {
         if (m_ppuLog.is_open()) {
             m_ppuLog.flush();
         }
+    }
+    
+    {
+        std::lock_guard<std::mutex> lock(m_portMutex);
+        if (m_portLog.is_open()) {
+            m_portLog.flush();
+        }
+    }
+}
+
+void Logger::clearLogs() {
+    // Clear CPU and APU log files
+    {
+        std::lock_guard<std::mutex> lock(m_cpuMutex);
+        if (m_cpuLog.is_open()) {
+            m_cpuLog.close();
+        }
+        m_cpuLog.open("cpu_trace.log", std::ios::out | std::ios::trunc);
+        if (m_cpuLog.is_open()) {
+            m_cpuLog << "=== CPU Execution Trace ===" << std::endl;
+            m_cpuLog << "Format: [Cyc:XXXXXXXXXX F:XXXX] PC | Opcode | Instruction | A | X | Y | SP | P | DBR | PBR | D | Flags" << std::endl;
+            m_cpuLog << "Cyc = CPU Cycle Count (monotonic), F = Frame Count" << std::endl;
+            m_cpuLog << "========================================" << std::endl;
+            m_cpuLog.flush();
+        }
+        m_cpuLineCount = 0;
+    }
+    
+    {
+        std::lock_guard<std::mutex> lock(m_apuMutex);
+        if (m_apuLog.is_open()) {
+            m_apuLog.close();
+        }
+        m_apuLog.open("apu_trace.log", std::ios::out | std::ios::trunc);
+        if (m_apuLog.is_open()) {
+            m_apuLog << "=== APU (SPC700) Execution Trace ===" << std::endl;
+            m_apuLog << "Format: [Frame] PC | Opcode | A | X | Y | SP | PSW | Instruction" << std::endl;
+            m_apuLog << "========================================" << std::endl;
+            m_apuLog.flush();
+        }
+        m_apuLineCount = 0;
     }
 }
 

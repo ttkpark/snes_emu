@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <vector>
+#include <string>
 #ifdef USE_SDL
 #include <SDL.h>
 #endif
@@ -48,6 +49,7 @@ public:
     
     // Background rendering functions
     uint32_t renderBackgroundMode1(int x);
+    uint32_t renderBackgroundMode6(int x);
     uint32_t renderTestPattern(int x);
     
     bool isFrameReady() const { return m_frameReady; }
@@ -106,6 +108,10 @@ private:
     // BG tilemap size settings (from BGSC registers, bit 7)
     // 0 = 32x32 tiles, 1 = 64x64 tiles
     bool m_bgMapSize[4];  // Tilemap size for BG1-4
+    
+    // BG tile size settings (from BGMODE register, bits 3-6)
+    // 0 = 8x8 tiles, 1 = 16x16 tiles
+    bool m_bgTileSize[4];  // Tile size for BG1-4 (BG1=bit5, BG2=bit6, BG3=bit3, BG4=bit4)
     
     // Mosaic settings
     uint8_t m_mosaicSize;      // Mosaic size (bits 0-3 of $2106)
@@ -202,7 +208,7 @@ private:
     void decodeTile(const uint8_t* tileData, uint8_t output[64], int bpp);
     
     // BG layer rendering (unified function)
-    PixelInfo renderBGx(int bgIndex, int tileX, int tileY, int pixelX, int pixelY);
+    PixelInfo renderBGx(int bgIndex, int tileX, int tileY, int pixelX, int pixelY, int bpp = 2);
     
     // Window functions
     bool isWindowEnabled(int x, int bgIndex, bool isSprite);
@@ -215,4 +221,13 @@ private:
     // Helper functions
     uint16_t getVRAMIncrementSize() const;
     void incrementVRAMAddress();
+    
+    // Debug functions
+    void dumpVRAM(const std::string& filename = "vram_dump.bin");
+    void dumpVRAMHex(const std::string& filename = "vram_dump.txt");
+    void dumpCGRAM(const std::string& filename = "cgram_dump.txt");
+    
+    // Text rendering functions
+    void renderText(int x, int y, const std::string& text, uint32_t color);
+    void drawChar(int x, int y, char c, uint32_t color);
 };

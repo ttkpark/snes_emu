@@ -302,14 +302,12 @@ void APU::writePort(uint8_t port, uint8_t value) {
     
     // Debug: Log port 1 writes during IPL data transfer
     if (port == 1) {
-        static int logCount1 = 0;
-        if (logCount1 < 100) {
-            std::ostringstream oss;
-            oss << "APU: CPU wrote port 1 = 0x" << std::hex << (int)value 
-                << " (old=0x" << (int)oldValue << ", loadState=" << (int)m_spcLoadState << ")" << std::dec;
-            Logger::getInstance().logAPU(oss.str());
-            logCount1++;
-        }
+        // Always log port 1 writes, especially during test failure handling
+        std::ostringstream oss;
+        oss << "APU: CPU wrote port 1 = 0x" << std::hex << (int)value 
+            << " (old=0x" << (int)oldValue << ", loadState=" << (int)m_spcLoadState 
+            << ", SPC700 PC=0x" << m_regs.pc << ")" << std::dec;
+        Logger::getInstance().logAPU(oss.str());
     }
     
     // Handle IPL protocol for SPC program loading
@@ -1383,6 +1381,18 @@ void APU::executeSPC700Instruction() {
                     << ", PC=0x" << savedPC << std::dec;
                 Logger::getInstance().logAPU(oss.str());
             }
+            // Debug: Log CMP dp,#imm for test0041 (PC 0x1313) - log memory bytes
+            if (savedPC == 0x1313) {
+                uint8_t byte1 = readARAM(savedPC + 1);
+                uint8_t byte2 = readARAM(savedPC + 2);
+                std::ostringstream oss;
+                oss << "APU: CMP dp,#imm (0x64) at test0041: PC=0x" << std::hex << savedPC
+                    << ", byte1=0x" << (int)byte1 << ", byte2=0x" << (int)byte2
+                    << ", dp=0x" << (int)dp << ", imm=0x" << (int)imm
+                    << ", addr=0x" << addr << ", val=0x" << (int)val 
+                    << ", result=0x" << (int)result << ", Z=" << getFlag(FLAG_Z) << std::dec;
+                Logger::getInstance().logAPU(oss.str());
+            }
         } break;
         case 0x3E: { // CMP X, dp
             uint8_t dp = readARAM(m_regs.pc++);
@@ -2174,6 +2184,20 @@ void APU::executeSPC700Instruction() {
             uint8_t result = sum & 0xFF;
             writeARAM(m_regs.x, result);
             updateNZ(result);
+            // Debug: Log ADC (X),(Y) for test0041
+            if (savedPC == 0x11f0) {
+                std::ostringstream oss;
+                oss << "APU: ADC (X),(Y): X=0x" << std::hex << (int)m_regs.x 
+                    << ", Y=0x" << (int)m_regs.y
+                    << ", valX=0x" << (int)valX << ", valY=0x" << (int)valY
+                    << ", C=" << carry
+                    << ", sum=0x" << sum
+                    << ", result=0x" << (int)result
+                    << ", written to addr=0x" << (int)m_regs.x
+                    << ", PSW=0x" << (int)m_regs.psw
+                    << ", PC=0x" << savedPC << std::dec;
+                Logger::getInstance().logAPU(oss.str());
+            }
         } break;
         
         // ADC dp,#imm - 0x98
@@ -3435,6 +3459,14 @@ uint8_t APU::readARAM(uint16_t addr) {
             case 0xF5: {
                 // snes9x style: SPC700 reads from $F5 (CPU I/O port 1)
                 uint8_t value = m_cpuPorts[1];
+                
+                // Debug: Log port reads during fail routine (PC 0x0343-0x0346)
+                if (m_regs.pc >= 0x0343 && m_regs.pc <= 0x0346) {
+                    std::ostringstream oss;
+                    oss << "APU: SPC700 read $F5 (PC=0x" << std::hex << m_regs.pc 
+                        << ") = 0x" << (int)value << " (m_cpuPorts[1]=0x" << (int)m_cpuPorts[1] << ")" << std::dec;
+                    Logger::getInstance().logAPU(oss.str());
+                }
                 
                 // Debug: Log port reads during IPL data transfer
                 if (m_regs.pc >= 0xFFDF && m_regs.pc <= 0xFFE6) {

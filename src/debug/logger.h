@@ -17,8 +17,10 @@ public:
     void logCPU(const std::string& message);
     void logAPU(const std::string& message);
     void logPPU(const std::string& message);
+    void logPort(const std::string& message);  // Port communication log
     
     void flush();
+    void clearLogs();  // Clear CPU and APU log files
     void setMaxEntries(int max) { m_maxEntries = max; }
     void setMaxLines(int max) { m_maxLines = max; }
     void setLoggingEnabled(bool enabled) { m_loggingEnabled = enabled; }
@@ -36,6 +38,7 @@ private:
     std::ofstream m_cpuLog;
     std::ofstream m_apuLog;
     std::ofstream m_ppuLog;
+    std::ofstream m_portLog;  // Port communication log
     
     std::deque<std::string> m_cpuBuffer;
     std::deque<std::string> m_apuBuffer;
@@ -44,12 +47,14 @@ private:
     std::mutex m_cpuMutex;
     std::mutex m_apuMutex;
     std::mutex m_ppuMutex;
+    std::mutex m_portMutex;
     
     int m_maxEntries;
     int m_maxLines;  // Maximum lines per log file before truncating
     int m_cpuLineCount;
     int m_apuLineCount;
     int m_ppuLineCount;
+    int m_portLineCount;
     bool m_loggingEnabled;
 };
 
