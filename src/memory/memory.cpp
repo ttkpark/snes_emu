@@ -338,31 +338,39 @@ void Memory::performDMA(uint8_t channel) {
     // Calculate source address
     uint32_t sourceAddr = (dma.sourceBank << 16) | dma.sourceAddr;
     
-    // Calculate destination address (PPU register)
+    // Calculate destination address
+    // Can be PPU register (0x2100-0x21FF) or APU port (0x2140-0x2143)
     uint16_t destAddr = 0x2100 + dma.destAddr;
+    bool isAPUPort = (destAddr >= 0x2140 && destAddr < 0x2144);
     
     std::ostringstream oss;
     oss << "DMA Channel " << (int)channel << ": " 
-        << (toPPU ? "CPU->PPU" : "PPU->CPU") 
+        << (toPPU ? "CPU->" : "") 
+        << (isAPUPort ? "APU" : "PPU")
+        << (toPPU ? "" : "->CPU")
         << " Mode=" << (int)mode 
         << " Size=" << dma.size 
         << " Source=0x" << std::hex << sourceAddr 
         << " Dest=0x" << destAddr << std::dec;
     Logger::getInstance().logCPU(oss.str());
     Logger::getInstance().flush();
-    // std::cout << "DMA Channel " << (int)channel << ": " 
-    //           << (toPPU ? "CPU->PPU" : "PPU->CPU") 
-    //           << " Mode=" << (int)mode 
-    //           << " Size=" << dma.size 
-    //           << " Source=0x" << std::hex << sourceAddr 
-    //           << " Dest=0x" << destAddr << std::dec << std::endl;
     
     // Perform transfer based on mode
     switch (mode) {
         case 0: // 1 register, write once
             if (toPPU && dma.size > 0) {
-                uint8_t data = read8(sourceAddr);
-                if (m_ppu) {
+                if (isAPUPort && m_apu) {
+                    // DMA to APU port
+                    for (uint16_t i = 0; i < dma.size; i++) {
+                        uint8_t data = read8(sourceAddr + i);
+                        uint8_t port = destAddr - 0x2140;
+                        if (port < 4) {
+                            m_apu->writePort(port, data);
+                        }
+                    }
+                } else if (m_ppu) {
+                    // DMA to PPU register
+                    uint8_t data = read8(sourceAddr);
                     m_ppu->writeRegister(destAddr, data);
                 }
             }
@@ -370,35 +378,45 @@ void Memory::performDMA(uint8_t channel) {
             
         case 1: // 2 registers, write twice (alternates between destAddr and destAddr+1)
             if (toPPU && dma.size > 0) {
-                std::ostringstream dmaDebug;
-                dmaDebug << "DMA Mode 1: First 16 bytes: ";
-                for (uint16_t i = 0; i < dma.size; i++) {
-                    uint8_t data = read8(sourceAddr + i);
-                    if (i < 16) {
-                        dmaDebug << std::hex << std::setw(2) << std::setfill('0') << (int)data << " ";
+                if (isAPUPort && m_apu) {
+                    // DMA to APU ports (alternates between two ports)
+                    for (uint16_t i = 0; i < dma.size; i++) {
+                        uint8_t data = read8(sourceAddr + i);
+                        uint8_t port = (destAddr - 0x2140) + (i & 1);
+                        if (port < 4) {
+                            m_apu->writePort(port, data);
+                        }
                     }
-                    if (m_ppu) {
+                } else if (m_ppu) {
+                    // DMA to PPU registers
+                    std::ostringstream dmaDebug;
+                    dmaDebug << "DMA Mode 1: First 16 bytes: ";
+                    for (uint16_t i = 0; i < dma.size; i++) {
+                        uint8_t data = read8(sourceAddr + i);
+                        if (i < 16) {
+                            dmaDebug << std::hex << std::setw(2) << std::setfill('0') << (int)data << " ";
+                        }
                         // Alternate between two registers
                         uint16_t targetReg = destAddr + (i & 1);
                         m_ppu->writeRegister(targetReg, data);
                     }
-                }
-                dmaDebug << std::dec;
-                Logger::getInstance().logCPU(dmaDebug.str());
-                
-                // Log bytes at offset 0x600 (where char '0' should be)
-                if (dma.size > 0x600) {
-                    std::ostringstream dmaDebug2;
-                    dmaDebug2 << "DMA Mode 1: Bytes at offset 0x600 (char '0'): ";
-                    for (uint16_t i = 0x600; i < 0x600 + 16 && i < dma.size; i++) {
-                        uint8_t data = read8(sourceAddr + i);
-                        dmaDebug2 << std::hex << std::setw(2) << std::setfill('0') << (int)data << " ";
+                    dmaDebug << std::dec;
+                    Logger::getInstance().logCPU(dmaDebug.str());
+                    
+                    // Log bytes at offset 0x600 (where char '0' should be)
+                    if (dma.size > 0x600) {
+                        std::ostringstream dmaDebug2;
+                        dmaDebug2 << "DMA Mode 1: Bytes at offset 0x600 (char '0'): ";
+                        for (uint16_t i = 0x600; i < 0x600 + 16 && i < dma.size; i++) {
+                            uint8_t data = read8(sourceAddr + i);
+                            dmaDebug2 << std::hex << std::setw(2) << std::setfill('0') << (int)data << " ";
+                        }
+                        dmaDebug2 << std::dec;
+                        Logger::getInstance().logCPU(dmaDebug2.str());
                     }
-                    dmaDebug2 << std::dec;
-                    Logger::getInstance().logCPU(dmaDebug2.str());
+                    
+                    Logger::getInstance().flush();
                 }
-                
-                Logger::getInstance().flush();
             }
             break;
             
@@ -406,9 +424,19 @@ void Memory::performDMA(uint8_t channel) {
         case 3: // 4 registers, write once
             // Simplified implementation
             if (toPPU && dma.size > 0) {
-                for (uint16_t i = 0; i < dma.size; i++) {
-                    uint8_t data = read8(sourceAddr + i);
-                    if (m_ppu) {
+                if (isAPUPort && m_apu) {
+                    // DMA to APU port
+                    for (uint16_t i = 0; i < dma.size; i++) {
+                        uint8_t data = read8(sourceAddr + i);
+                        uint8_t port = destAddr - 0x2140;
+                        if (port < 4) {
+                            m_apu->writePort(port, data);
+                        }
+                    }
+                } else if (m_ppu) {
+                    // DMA to PPU register
+                    for (uint16_t i = 0; i < dma.size; i++) {
+                        uint8_t data = read8(sourceAddr + i);
                         m_ppu->writeRegister(destAddr, data);
                     }
                 }

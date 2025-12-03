@@ -64,8 +64,19 @@ private:
     // APU Memory (64KB)
     std::vector<uint8_t> m_aram; // Audio RAM
     
+    // IPL ROM (64 bytes at 0xFFC0-0xFFFF)
+    // This is hardware ROM, not part of ARAM
+    // When IPL ROM is enabled, reads from 0xFFC0-0xFFFF return IPL ROM data
+    // When IPL ROM is disabled, reads from 0xFFC0-0xFFFF return ARAM data
+    static constexpr uint16_t IPL_ROM_BASE = 0xFFC0;
+    static constexpr uint16_t IPL_ROM_SIZE = 64;
+    uint8_t m_iplROM[IPL_ROM_SIZE];
+    bool m_iplromEnable;  // IPL ROM enable flag (controlled by $F1 bit 7)
+    
     // Communication ports $2140-$2143
-    uint8_t m_ports[4];
+    // snes9x style: CPU->SPC via m_cpuPorts, SPC->CPU via m_aram[0xF4+port]
+    uint8_t m_cpuPorts[4];  // CPU writes, SPC700 reads (via $F4-$F7)
+    // SPC700 writes to $F4-$F7 are stored in m_aram[0xF4+port], CPU reads via readPort()
     
     // APU State
     bool m_ready;
@@ -85,8 +96,10 @@ private:
     } m_spcLoadState;
     uint16_t m_spcLoadAddr;      // Destination address for SPC program
     uint16_t m_spcLoadSize;      // Size of SPC program being loaded
-    uint16_t m_spcLoadIndex;     // Current byte index being loaded
+    uint16_t m_spcLoadIndex;     // Current byte index being loaded (actual cumulative count)
     uint16_t m_spcExecAddr;      // Execution address for SPC program
+    uint8_t m_lastPort0Value;    // Last value written to Port 0 (for tracking byte transfers)
+    uint16_t m_port0WrapCount;   // Number of times Port 0 value wrapped from high to low
     
     // Timers (3 timers) - Timer 0/1: 8kHz, Timer 2: 64kHz
     struct Timer {
@@ -198,6 +211,7 @@ private:
     void setFlag(uint8_t flag, bool value);
     bool getFlag(uint8_t flag) const;
     void updateNZ(uint8_t value);
+    uint16_t getDirectPageAddr(uint8_t dp) const;  // Calculate direct page address
     uint8_t readARAM(uint16_t addr);
     void writeARAM(uint16_t addr, uint8_t value);
     void push(uint8_t value);

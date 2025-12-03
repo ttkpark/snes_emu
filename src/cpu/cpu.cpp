@@ -206,7 +206,38 @@ void CPU::step() {
     }
     
     
-    // Check for fail condition (entering fail routine at 0x008242)
+    // Check for fail condition: reaching the final loop in @failed routine
+    // @wait3 loop (cmp $2140, bne @wait3) or @end loop (bra @end)
+    // These are the final loops that indicate test failure
+    // PC range: approximately 0x008220-0x008270 for @failed routine
+    if (m_address >= 0x008220 && m_address <= 0x008270) {
+        // Check if we're in a tight loop (same PC repeating)
+        // This indicates we've reached the final failure loop
+        static uint32_t lastFailPC = 0;
+        static int failLoopCount = 0;
+        
+        if (m_address == lastFailPC) {
+            failLoopCount++;
+            // If we're looping at the same PC 3+ times, it's the final failure loop
+            if (failLoopCount >= 3) {
+                std::cout << "\n=== SPC TEST FAILED - Reached final loop ===" << std::endl;
+                std::cout << "PC: 0x" << std::hex << m_address << std::dec << std::endl;
+                std::cout << "Loop count: " << failLoopCount << std::endl;
+                Logger::getInstance().logCPU("=== SPC TEST FAILED - Reached final loop ===");
+                std::ostringstream oss;
+                oss << "Final loop PC: 0x" << std::hex << m_address << std::dec << ", loop count: " << failLoopCount;
+                Logger::getInstance().logCPU(oss.str());
+                Logger::getInstance().flush();
+                m_quitEmulation = true;
+                return;
+            }
+        } else {
+            lastFailPC = m_address;
+            failLoopCount = 1;
+        }
+    }
+    
+    // Legacy check for fail condition (entering fail routine at 0x008242)
     if (m_address == 0x008242) {
         Logger::getInstance().logCPU("=== TEST FAILED - ENTERING fail routine ===");
         Logger::getInstance().logCPU("Memory Dump (0x000000 - 0x000040):");
@@ -332,15 +363,42 @@ void CPU::step() {
     bool atWaitVBlank = (m_address >= 0x00825b && m_address <= 0x008265);  // Expanded range to include both wait loops
     bool atInitTest = (m_address >= 0x008093 && m_address <= 0x0080E0);
     
-    // Completely disable VBL-DBG logging to reduce spam - only log VBlank start/end via RDNMI-VBLANK
+    // Filter repetitive loops to reduce log size
+    bool atWaitResult = (m_address >= 0x0081b3 && m_address <= 0x0081b9);  // wait_result loop: LDA $2140, BEQ
+    bool atUpdateTestNum = (m_address >= 0x0081a4 && m_address <= 0x0081af);  // update_test_num function
+    bool atWriteHex = (m_address >= 0x008119 && m_address <= 0x008145);  // write_hex8/write_hex16 functions
+    bool atFailedLoop = (m_address >= 0x00822b && m_address <= 0x008233);  // @failed routine BIT/BPL loop
+    
+    // Completely disable 
+    // L-DBG logging to reduce spam - only log VBlank start/end via RDNMI-VBLANK
     // VBlank loop logging is now handled by RDNMI-VBLANK and BPL-NO-BRANCH logs
     
-    // Skip detailed instruction logging for VBlank loop to reduce log size
-    bool enableLogging = true;  // Disable logging in VBlank loop
+    // Skip detailed instruction logging for repetitive loops to reduce log size
+    bool enableLogging = true;
     
     if (enableLogging) {
-        // Enable detailed logging - log ALL instructions
-        bool shouldLog = !atWaitVBlank;  // Log all instructions - no filtering
+        // Enable detailed logging - filter repetitive loops
+        bool shouldLog = !atWaitVBlank && !atWaitResult && !atUpdateTestNum && !atWriteHex && !atFailedLoop;
+        
+        // Log every 1000th instruction in repetitive loops to track progress
+        static int waitResultCount = 0;
+        static int updateTestNumCount = 0;
+        if (atWaitResult) {
+            waitResultCount++;
+            if (waitResultCount % 1000 == 0) {
+                shouldLog = true;
+            }
+        } else {
+            waitResultCount = 0;
+        }
+        if (atUpdateTestNum) {
+            updateTestNumCount++;
+            if (updateTestNumCount % 100 == 0) {
+                shouldLog = true;
+            }
+        } else {
+            updateTestNumCount = 0;
+        }
         
         if (instructionCount % 10000 == 0) {
             shouldLog = true;
@@ -903,6 +961,9 @@ void CPU::write16bit(uint16_t address, uint16_t value) {
     // Write 16-bit value (little endian)
     m_memory->write8(address, value & 0xFF);
     m_memory->write8(address + 1, (value >> 8) & 0xFF);
+    
+    // Note: test0000 start detection moved to APU::step() when SPC700 actually starts test0000
+    // (PC:0x0359, MOV A,#$00)
 }
 
 void CPU::executeInstruction(uint8_t opcode) {
@@ -983,11 +1044,24 @@ void CPU::executeInstruction(uint8_t opcode) {
         case 0xAD: { // LDA Absolute
             uint16_t addr = m_memory->read16(m_address);
             m_pc += 2;
+            
             // Absolute addressing uses DBR (Data Bank Register)
             uint32_t fullAddr = (m_dbr << 16) | addr;
             if (m_modeM) {
-                m_a = (m_a & 0xFF00) | m_memory->read8(fullAddr);
+                uint8_t value = m_memory->read8(fullAddr);
+                uint8_t oldA = m_a & 0xFF;
+                m_a = (m_a & 0xFF00) | value;
                 setZeroNegative8(m_a & 0xFF);
+                // Debug: Log reads from port 0x2140 (any bank) or when PC is in @wait5 loop or wait_result
+                if ((fullAddr & 0xFFFF) == 0x2140 || (m_address >= 0x00818b && m_address <= 0x00818e) || (m_address >= 0x0081b3 && m_address <= 0x0081b9)) {
+                    std::ostringstream oss;
+                    oss << "CPU: LDA $" << std::hex << fullAddr << " = 0x" << (int)value 
+                        << " (old A=0x" << (int)oldA << ", new A=0x" << (int)(m_a & 0xFF) 
+                        << ", Z=" << ((m_p & 0x02) ? "1" : "0") 
+                        << ", DBR=0x" << (int)m_dbr << ", PC=0x" << m_address << ")" << std::dec;
+                    std::cout << oss.str() << std::endl;
+                    Logger::getInstance().logCPU(oss.str());
+                }
             } else {
                 m_a = m_memory->read16(fullAddr);
                 setZeroNegative(m_a);
@@ -1054,6 +1128,13 @@ void CPU::executeInstruction(uint8_t opcode) {
             uint16_t addr = (m_d + operand) & 0xFFFF;
             if (m_modeM) {
                 m_memory->write8(addr, m_a & 0xFF);
+                // Debug: Log writes to Port 1 (0x2141) in @failed routine
+                if (addr == 0x2141 && (m_address >= 0x008240 && m_address <= 0x008270)) {
+                    std::ostringstream oss;
+                    oss << "CPU: STA $2141 = 0x" << std::hex << (int)(m_a & 0xFF) 
+                        << " (PC=0x" << m_address << ")" << std::dec;
+                    Logger::getInstance().logCPU(oss.str());
+                }
             } else {
                 write16bit(addr, m_a);
             }
@@ -1083,6 +1164,13 @@ void CPU::executeInstruction(uint8_t opcode) {
                 Logger::getInstance().logCPU(debug.str());
                 Logger::getInstance().flush();
                 staCount++;
+            }
+            // Debug: Log writes to Port 1 (0x2141) in @failed routine
+            if (addr == 0x2141 && (m_address >= 0x008240 && m_address <= 0x008280)) {
+                std::ostringstream oss;
+                oss << "CPU: STA $2141 = 0x" << std::hex << (int)(m_a & 0xFF) 
+                    << " (PC=0x" << m_address << ")" << std::dec;
+                Logger::getInstance().logCPU(oss.str());
             }
             if (m_modeM) {
                 m_memory->write8(fullAddr, m_a & 0xFF);
@@ -1403,6 +1491,16 @@ void CPU::executeInstruction(uint8_t opcode) {
                 setCarry((m_a & 0xFF) >= value);
                 setZero(result == 0);
                 setNegative(result & 0x80);
+                // Debug: Log CMP #imm when comparing Port 0 value (wait_result routine)
+                if (m_address >= 0x0081b3 && m_address <= 0x0081b9) {
+                    std::ostringstream oss;
+                    oss << "CPU: CMP #imm at wait_result: A=0x" << std::hex << (int)(m_a & 0xFF) 
+                        << " imm=0x" << (int)value 
+                        << " result=0x" << (int)result 
+                        << " Z=" << ((m_p & 0x02) ? "1" : "0")
+                        << " PC=0x" << m_address << std::dec;
+                    Logger::getInstance().logCPU(oss.str());
+                }
             } else {
                 // 16-bit mode - Use m_memory->read16 to properly handle 24-bit addressing
                 uint16_t value = m_memory->read16(m_address_plus_1);
@@ -1472,6 +1570,17 @@ void CPU::executeInstruction(uint8_t opcode) {
                 setCarry((m_a & 0xFF) >= value);
                 setZero(result == 0);
                 setNegative(result & 0x80);
+                // Debug: Log CMP when comparing with $2140 (APU port 0)
+                if ((effectiveAddr & 0xFFFF) == 0x2140) {
+                    std::ostringstream oss;
+                    oss << "CPU: CMP $2140: A=0x" << std::hex << (int)(m_a & 0xFF) 
+                        << " value=0x" << (int)value 
+                        << " result=0x" << (int)result 
+                        << " Z=" << ((m_p & 0x02) ? "1" : "0")
+                        << " PC=0x" << m_address << std::dec;
+                    Logger::getInstance().logCPU(oss.str());
+                    
+                }
             } else {
                 // 16-bit mode
                 uint16_t value = m_memory->read16(effectiveAddr); // Use m_memory->read16 for 24-bit addressing
@@ -3397,10 +3506,31 @@ void CPU::executeInstruction(uint8_t opcode) {
             }
         } break;
         case 0xD0: { // BNE - Branch if Not Equal
-            uint8_t offset = m_memory->read8(m_address_plus_1); // This increments m_pc
-            if (!(m_p & 0x02)) {
+            // m_address is the address of the BNE opcode (before PC increment)
+            // m_address_plus_1 increments PC, so we need to read from m_address + 1
+            uint32_t addrForOffset = m_address_plus_1;
+            uint8_t offset = m_memory->read8(addrForOffset);
+            bool zFlag = (m_p & 0x02) != 0;
+            if (!zFlag) {
                 // Z flag is clear, branch
                 m_pc += (int8_t)offset;
+                // Debug: Log branches in @wait5 loop
+                if (m_address >= 0x00818b && m_address <= 0x00818e) {
+                    std::ostringstream oss;
+                    oss << "CPU: BNE at 0x" << std::hex << m_address 
+                        << " (Z=" << (zFlag ? "1" : "0") << ", A=0x" << (int)(m_a & 0xFF)
+                        << ", offset_raw=0x" << (int)offset << ", offset_signed=" << (int)(int8_t)offset
+                        << ", read_addr=0x" << addrForOffset << ", new PC=0x" << m_pc << ")" << std::dec;
+                    Logger::getInstance().logCPU(oss.str());
+                }
+            } else {
+                // Debug: Log when exiting @wait5 loop
+                if (m_address >= 0x00818b && m_address <= 0x00818e) {
+                    std::ostringstream oss;
+                    oss << "CPU: BNE at 0x" << std::hex << m_address 
+                        << " (Z=1, A=0x" << (int)(m_a & 0xFF) << ", NO BRANCH - exiting loop)" << std::dec;
+                    Logger::getInstance().logCPU(oss.str());
+                }
             }
             // If Z flag is set, no branch - m_pc already incremented by m_address_plus_1
         } break;
@@ -3583,9 +3713,16 @@ void CPU::executeInstruction(uint8_t opcode) {
         } break;
         
         case 0x60: { // RTS - Return from Subroutine
-            // Pull return address from stack (in page 1: 0x0100-0x01FF)
-            // Stack grows downward, so we need to read in reverse order
             uint16_t addr = pullStack16();
+            // Debug: Log RTS execution
+            static int rtsCount = 0;
+            if (rtsCount < 10) {
+                std::cout << "CPU: RTS at PC=0x" << std::hex << m_address 
+                          << " pulled addr=0x" << addr 
+                          << " new PC=0x" << addr + 1 
+                          << " new SP=0x" << m_sp << std::dec << std::endl;
+                rtsCount++;
+            }
             m_pc = addr + 1;  // RTS returns to address + 1
             stackTrace();
         } break;
@@ -5631,6 +5768,10 @@ void CPU::executeInstruction(uint8_t opcode) {
         } break;
         
         case 0x00: { // BRK
+            // Debug: Log BRK execution with PC before BRK
+            std::cout << "CPU: BRK executed at PC=0x" << std::hex << m_address 
+                      << " (before BRK, PC was 0x" << (m_address - 1) << ")" << std::dec << std::endl;
+            
             // Treat BRK as NOP to avoid infinite loops
             m_pc++; // Skip signature byte (PC already incremented after opcode fetch)
             // No other processing - just continue execution
