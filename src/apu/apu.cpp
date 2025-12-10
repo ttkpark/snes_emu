@@ -303,11 +303,11 @@ void APU::writePort(uint8_t port, uint8_t value) {
     // Debug: Log port 1 writes during IPL data transfer
     if (port == 1) {
         // Always log port 1 writes, especially during test failure handling
-        std::ostringstream oss;
-        oss << "APU: CPU wrote port 1 = 0x" << std::hex << (int)value 
+            std::ostringstream oss;
+            oss << "APU: CPU wrote port 1 = 0x" << std::hex << (int)value 
             << " (old=0x" << (int)oldValue << ", loadState=" << (int)m_spcLoadState 
             << ", SPC700 PC=0x" << m_regs.pc << ")" << std::dec;
-        Logger::getInstance().logAPU(oss.str());
+            Logger::getInstance().logAPU(oss.str());
     }
     
     // Handle IPL protocol for SPC program loading
@@ -1356,10 +1356,49 @@ void APU::executeSPC700Instruction() {
         
         // Comparison operations
         case 0x68: { // CMP A, #imm
+            uint16_t savedPC = m_regs.pc;
             uint8_t imm = readARAM(m_regs.pc++);
+            uint8_t pswBefore = m_regs.psw;
             uint8_t result = m_regs.a - imm;
-            setFlag(FLAG_C, m_regs.a >= imm);
-            updateNZ(result);
+            // CMP only modifies C, Z, N flags - preserve I, H, B, P, V flags
+            uint8_t preservedFlags = pswBefore & (FLAG_I | FLAG_H | FLAG_B | FLAG_P | FLAG_V);
+            bool carry = m_regs.a >= imm;
+            // Clear C, Z, N flags first, then set them
+            m_regs.psw &= ~(FLAG_C | FLAG_Z | FLAG_N);
+            if (carry) m_regs.psw |= FLAG_C;
+            if (result == 0) m_regs.psw |= FLAG_Z;
+            if (result & 0x80) m_regs.psw |= FLAG_N;
+            // Restore preserved flags
+            m_regs.psw |= preservedFlags;
+            uint8_t pswAfter = m_regs.psw;
+            // Debug: Log CMP A,#imm for test0065 debugging (log all executions for now)
+            // Focus on test0065 (PC=0x1a16) and test0002 (PC=0x03d8) but also log others
+            bool shouldLog = (savedPC == 0x1a16 || savedPC == 0x03d8 || 
+                             (savedPC >= 0x1a00 && savedPC <= 0x1a20) ||
+                             (savedPC >= 0x03d0 && savedPC <= 0x03e0));
+            if (shouldLog) {
+                std::ostringstream oss;
+                oss << "APU: CMP A,#imm: PC=0x" << std::hex << savedPC
+                    << ", A=0x" << (int)m_regs.a
+                    << ", imm=0x" << (int)imm
+                    << ", result=0x" << (int)result
+                    << ", PSW_before=0x" << (int)pswBefore
+                    << ", preservedFlags=0x" << (int)preservedFlags
+                    << ", PSW_after=0x" << (int)pswAfter
+                    << ", I_before=" << (int)((pswBefore & FLAG_I) ? 1 : 0)
+                    << ", I_preserved=" << (int)((preservedFlags & FLAG_I) ? 1 : 0)
+                    << ", I_after=" << (int)((pswAfter & FLAG_I) ? 1 : 0)
+                    << ", H_before=" << (int)((pswBefore & FLAG_H) ? 1 : 0)
+                    << ", H_preserved=" << (int)((preservedFlags & FLAG_H) ? 1 : 0)
+                    << ", H_after=" << (int)((pswAfter & FLAG_H) ? 1 : 0)
+                    << ", C=" << (int)((pswAfter & FLAG_C) ? 1 : 0)
+                    << ", Z=" << (int)((pswAfter & FLAG_Z) ? 1 : 0)
+                    << ", V=" << (int)((pswAfter & FLAG_V) ? 1 : 0)
+                    << ", N=" << (int)((pswAfter & FLAG_N) ? 1 : 0)
+                    << std::dec;
+                Logger::getInstance().logAPU(oss.str());
+                std::cout << oss.str() << std::endl; // Also print to console
+            }
         } break;
         case 0x64: { // CMP dp,#imm (NOTE: Some ROMs use 0x64 instead of 0x78 for CMP dp,#imm)
             // Operand order for 0x64: dp, imm (different from 0x78 which is imm, dp)
@@ -1411,16 +1450,72 @@ void APU::executeSPC700Instruction() {
             updateNZ(result);
         } break;
         case 0xAD: { // CMP Y, #imm
+            uint16_t savedPC = m_regs.pc;
             uint8_t imm = readARAM(m_regs.pc++);
+            uint8_t pswBefore = m_regs.psw;
             uint8_t result = m_regs.y - imm;
-            setFlag(FLAG_C, m_regs.y >= imm);
-            updateNZ(result);
+            // CMP only modifies C, Z, N flags - preserve I, H, B, P, V flags
+            uint8_t preservedFlags = pswBefore & (FLAG_I | FLAG_H | FLAG_B | FLAG_P | FLAG_V);
+            bool carry = m_regs.y >= imm;
+            // Clear C, Z, N flags first, then set them
+            m_regs.psw &= ~(FLAG_C | FLAG_Z | FLAG_N);
+            if (carry) m_regs.psw |= FLAG_C;
+            if (result == 0) m_regs.psw |= FLAG_Z;
+            if (result & 0x80) m_regs.psw |= FLAG_N;
+            // Restore preserved flags
+            m_regs.psw |= preservedFlags;
+            uint8_t pswAfter = m_regs.psw;
+            // Debug: Log CMP Y,#imm for test0065 debugging
+            if (savedPC == 0x1a23 || (savedPC >= 0x1a20 && savedPC <= 0x1a30)) {
+                std::ostringstream oss;
+                oss << "APU: CMP Y,#imm: PC=0x" << std::hex << savedPC
+                    << ", Y=0x" << (int)m_regs.y
+                    << ", imm=0x" << (int)imm
+                    << ", result=0x" << (int)result
+                    << ", PSW_before=0x" << (int)pswBefore
+                    << ", preservedFlags=0x" << (int)preservedFlags
+                    << ", PSW_after=0x" << (int)pswAfter
+                    << ", Z=" << (int)((pswAfter & FLAG_Z) ? 1 : 0)
+                    << ", C=" << (int)((pswAfter & FLAG_C) ? 1 : 0)
+                    << ", N=" << (int)((pswAfter & FLAG_N) ? 1 : 0)
+                    << std::dec;
+                Logger::getInstance().logAPU(oss.str());
+                std::cout << oss.str() << std::endl;
+            }
         } break;
         case 0xC8: { // CMP X, #imm
+            uint16_t savedPC = m_regs.pc;
             uint8_t imm = readARAM(m_regs.pc++);
+            uint8_t pswBefore = m_regs.psw;
             uint8_t result = m_regs.x - imm;
-            setFlag(FLAG_C, m_regs.x >= imm);
-            updateNZ(result);
+            // CMP only modifies C, Z, N flags - preserve I, H, B, P, V flags
+            uint8_t preservedFlags = pswBefore & (FLAG_I | FLAG_H | FLAG_B | FLAG_P | FLAG_V);
+            bool carry = m_regs.x >= imm;
+            // Clear C, Z, N flags first, then set them
+            m_regs.psw &= ~(FLAG_C | FLAG_Z | FLAG_N);
+            if (carry) m_regs.psw |= FLAG_C;
+            if (result == 0) m_regs.psw |= FLAG_Z;
+            if (result & 0x80) m_regs.psw |= FLAG_N;
+            // Restore preserved flags
+            m_regs.psw |= preservedFlags;
+            uint8_t pswAfter = m_regs.psw;
+            // Debug: Log CMP X,#imm for test0065 debugging
+            if (savedPC == 0x1a1d || (savedPC >= 0x1a10 && savedPC <= 0x1a30)) {
+                std::ostringstream oss;
+                oss << "APU: CMP X,#imm: PC=0x" << std::hex << savedPC
+                    << ", X=0x" << (int)m_regs.x
+                    << ", imm=0x" << (int)imm
+                    << ", result=0x" << (int)result
+                    << ", PSW_before=0x" << (int)pswBefore
+                    << ", preservedFlags=0x" << (int)preservedFlags
+                    << ", PSW_after=0x" << (int)pswAfter
+                    << ", Z=" << (int)((pswAfter & FLAG_Z) ? 1 : 0)
+                    << ", C=" << (int)((pswAfter & FLAG_C) ? 1 : 0)
+                    << ", N=" << (int)((pswAfter & FLAG_N) ? 1 : 0)
+                    << std::dec;
+                Logger::getInstance().logAPU(oss.str());
+                std::cout << oss.str() << std::endl;
+            }
         } break;
         
         // Branch instructions
@@ -1617,9 +1712,18 @@ void APU::executeSPC700Instruction() {
             uint8_t dp = readARAM(m_regs.pc++);
             uint16_t addr = getDirectPageAddr(dp);
             uint8_t val = readARAM(addr);
+            uint8_t pswBefore = m_regs.psw;
             uint8_t result = val - imm;
-            setFlag(FLAG_C, val >= imm);
-            updateNZ(result);
+            // CMP only modifies C, Z, N flags - preserve I, H, B, P, V flags
+            uint8_t preservedFlags = pswBefore & (FLAG_I | FLAG_H | FLAG_B | FLAG_P | FLAG_V);
+            bool carry = val >= imm;
+            // Clear C, Z, N flags first, then set them
+            m_regs.psw &= ~(FLAG_C | FLAG_Z | FLAG_N);
+            if (carry) m_regs.psw |= FLAG_C;
+            if (result == 0) m_regs.psw |= FLAG_Z;
+            if (result & 0x80) m_regs.psw |= FLAG_N;
+            // Restore preserved flags
+            m_regs.psw |= preservedFlags;
             
             // Debug: Log CMP dp,#imm for test debugging
             if (m_regs.pc >= 0x036f && m_regs.pc <= 0x0380) {
@@ -1640,6 +1744,23 @@ void APU::executeSPC700Instruction() {
                     << ", result=0x" << (int)result << ", Z=" << getFlag(FLAG_Z) 
                     << ", PC=0x" << savedPC << std::dec;
                 Logger::getInstance().logAPU(oss.str());
+            }
+            // Debug: Log CMP dp,#imm for test0065 (PC 0x1a1a)
+            if (savedPC == 0x1a1a || (savedPC >= 0x1a10 && savedPC <= 0x1a30)) {
+                std::ostringstream oss;
+                oss << "APU: CMP dp,#imm (0x78): dp=0x" << std::hex << (int)dp 
+                    << ", addr=0x" << addr
+                    << ", val=0x" << (int)val << ", imm=0x" << (int)imm 
+                    << ", result=0x" << (int)result
+                    << ", PSW_before=0x" << (int)pswBefore
+                    << ", preservedFlags=0x" << (int)preservedFlags
+                    << ", PSW_after=0x" << (int)m_regs.psw
+                    << ", Z=" << getFlag(FLAG_Z)
+                    << ", C=" << getFlag(FLAG_C)
+                    << ", N=" << getFlag(FLAG_N)
+                    << ", PC=0x" << savedPC << std::dec;
+                Logger::getInstance().logAPU(oss.str());
+                std::cout << oss.str() << std::endl; // Also print to console
             }
             
             // Debug: Log CMP dp,#imm for test0041 (PC 0x11f8-0x1203)
@@ -2794,10 +2915,18 @@ void APU::executeSPC700Instruction() {
             uint8_t dp = readARAM(m_regs.pc++);
             uint16_t addr = getDirectPageAddr((dp + m_regs.x) & 0xFF);
             uint8_t val = readARAM(addr);
+            uint8_t pswBefore = m_regs.psw;
+            // ASL only modifies C, Z, N flags - preserve I, H, B, P, V flags
+            uint8_t preservedFlags = pswBefore & (FLAG_I | FLAG_H | FLAG_B | FLAG_P | FLAG_V);
             setFlag(FLAG_C, (val & 0x80) != 0);
             val <<= 1;
             writeARAM(addr, val);
-            updateNZ(val);
+            // Clear Z, N flags first, then set them
+            m_regs.psw &= ~(FLAG_Z | FLAG_N);
+            if (val == 0) m_regs.psw |= FLAG_Z;
+            if (val & 0x80) m_regs.psw |= FLAG_N;
+            // Restore preserved flags
+            m_regs.psw |= preservedFlags;
         } break;
         case 0x2B: { // ROL dp
             uint8_t dp = readARAM(m_regs.pc++);
@@ -3854,6 +3983,230 @@ void APU::updateEnvelopeAndPitch(int channel) {
             uint8_t sustainRate = adsr2 & 0x1F;
             
             if (sustainRate > 0 && ch.envLevel > 0) {
+                // Slow decrease (simplified)
+                if ((m_spc700Cycles & 0xFF) == 0) {
+                    ch.envLevel -= (sustainRate >> 1);
+                    if (ch.envLevel < 0) ch.envLevel = 0;
+                }
+            }
+            break;
+        }
+        
+        case ENV_RELEASE: {
+            // Release: decrease to 0
+            if (ch.envLevel > 0) {
+                ch.envLevel -= 0x40; // Fast release (simplified)
+                if (ch.envLevel < 0) {
+                    ch.envLevel = 0;
+                    ch.enabled = false;
+                }
+            }
+            break;
+        }
+        
+        case ENV_DIRECT: {
+            // Direct mode: use volume directly
+            uint8_t vol = dsp[channel * 0x10 + 0x00]; // VOL L
+            ch.envLevel = vol * 0x80;
+            break;
+        }
+    }
+}
+
+int16_t APU::getSampleWithPitch(int channel) {
+    AudioChannel& ch = m_channels[channel];
+    
+    // Advance sample position by step
+    ch.samplePos += ch.sampleStep;
+    
+    // Extract integer and fractional parts (16.16 fixed point)
+    uint16_t sampleIndex = (ch.samplePos >> 16) & 0xFFFF;
+    uint16_t fraction = ch.samplePos & 0xFFFF;
+    
+    // While we need more samples in the buffer
+    while (sampleIndex >= 16) {
+        // Decode next BRR block (16 samples)
+        for (int i = 0; i < 16; i++) {
+            ch.brrBuffer[i] = decodeBRR(channel);
+        }
+        sampleIndex -= 16;
+        ch.samplePos -= (16 << 16); // Adjust position
+    }
+    
+    // Get current and next sample for interpolation
+    int16_t sample0 = ch.brrBuffer[sampleIndex];
+    int16_t sample1 = (sampleIndex < 15) ? ch.brrBuffer[sampleIndex + 1] : decodeBRR(channel);
+    
+    // Linear interpolation
+    // result = sample0 + (sample1 - sample0) * fraction / 65536
+    int32_t diff = sample1 - sample0;
+    int32_t interpolated = sample0 + ((diff * fraction) >> 16);
+    
+    // Clamp to 16-bit range
+    int16_t result = (int16_t)std::min(32767, std::max(-32768, interpolated));
+    
+    return result;
+}
+
+// DSP Register Mapping:
+// Channels: $00-$0F (ch0), $10-$1F (ch1), ..., $70-$7F (ch7)
+//   Each channel: VOL L($00), VOL R($01), PITCH L($02), PITCH H($03), 
+//                  SRCN($04), ADSR1($05), ADSR2($06), GAIN($07)
+// Global registers:
+//   $0C: MVOL L (Master Volume Left)
+//   $1C: MVOL R (Master Volume Right)
+//   $2C: EVOL L (Echo Volume Left)
+//   $3C: EVOL R (Echo Volume Right)
+//   $4C: KON (Key On - bits 0-7 = channels 0-7)
+//   $5C: KOF (Key Off - bits 0-7 = channels 0-7)
+//   $5D: DIR (Sample Directory Address - page $XX00)
+//   $5E: ESA (Echo Start Address - page $XX00)
+//   $6C: EDL (Echo Delay - lower 4 bits)
+//   $7C: EFB (Echo Feedback - signed)
+//   $0D: EON (Echo Enable - bits 0-7 = channels 0-7)
+//   $2D: FLG (Reset/Mute/Noise clock - bit 7=mute, bit 6=reset)
+//   $3D: NON (Noise Enable - bits 0-7 = channels 0-7)
+//   $4D: PMON (Pitch Modulation Enable - bits 0-7 = channels 0-7)
+//   $5D: DIR (already mentioned)
+//   $6D: KOF (already mentioned)
+//   $7D: KOF (duplicate?)
+//   $0E-$0F: FIR filter coefficients
+//   $1E-$1F: FIR filter coefficients
+//   $2E-$2F: FIR filter coefficients
+//   $3E-$3F: FIR filter coefficients
+//   $4E-$4F: FIR filter coefficients
+//   $5E-$5F: FIR filter coefficients (ESA overlaps)
+//   $6E-$6F: FIR filter coefficients
+//   $7E-$7F: FIR filter coefficients
+
+void APU::handleDSPRegisterWrite(uint8_t addr, uint8_t value, uint8_t oldValue) {
+    // Channel-specific registers (each channel uses $00-$0F, $10-$1F, etc.)
+    if ((addr & 0x0F) < 0x08) {
+        int channel = addr >> 4;
+        if (channel < 8) {
+            uint8_t reg = addr & 0x0F;
+            
+            switch (reg) {
+                case 0x00: // VOL L (signed, -128 to +127)
+                case 0x01: // VOL R (signed, -128 to +127)
+                    // Volume registers are read during audio generation
+                    break;
+                    
+                case 0x02: // PITCH L (low byte of 14-bit pitch)
+                case 0x03: // PITCH H (high byte of 14-bit pitch, bits 6-7)
+                    // Pitch registers are used in pitch calculation
+                    break;
+                    
+                case 0x04: // SRCN (Sample Number, 0-255)
+                    // Source number is used when key is pressed
+                    break;
+                    
+                case 0x05: { // ADSR1 (Attack Rate[4], Decay Rate[3])
+                    // ADSR1 is used in envelope processing
+                    break;
+                }
+                    
+                case 0x06: { // ADSR2 (Sustain Rate[5], Sustain Level[3])
+                    // Extract sustain level (bits 5-7)
+                    m_channels[channel].sustainLevel = (value >> 5) & 0x07;
+                    break;
+                }
+                    
+                case 0x07: // GAIN (Gain mode and value)
+                    // GAIN is used for direct volume control mode
+                    break;
+            }
+        }
+    }
+    
+    // Global registers
+    switch (addr) {
+        case 0x0C: // MVOL L (Master Volume Left, signed)
+        case 0x1C: // MVOL R (Master Volume Right, signed)
+            // Master volume is applied during mixing
+            break;
+            
+        case 0x2C: // EVOL L (Echo Volume Left, signed)
+        case 0x3C: // EVOL R (Echo Volume Right, signed)
+            // Echo volume is used when echo is enabled
+            break;
+            
+        case 0x4C: { // KON (Key On)
+            // Key On - start playback for enabled channels
+            for (int i = 0; i < 8; i++) {
+                if (value & (1 << i)) {
+                    m_channels[i].keyOn = true;
+                    m_channels[i].enabled = true;
+                }
+            }
+            break;
+        }
+        
+        case 0x5C: { // KOF (Key Off)
+            // Key Off - enter release phase for enabled channels
+            for (int i = 0; i < 8; i++) {
+                if (value & (1 << i)) {
+                    m_channels[i].envState = ENV_RELEASE;
+                    m_channels[i].keyOn = false;
+                }
+            }
+            break;
+        }
+        
+        case 0x0D: // EON (Echo Enable)
+            // Echo enable flags - stored in register, used during echo processing
+            break;
+            
+        case 0x2D: { // FLG (Flags)
+            // Bit 7: MUTE (mute all channels)
+            // Bit 6: ECEN (Echo Enable - master enable)
+            // Bit 5-0: Noise clock divider
+            if (value & 0x80) {
+                // Mute all channels
+                for (int i = 0; i < 8; i++) {
+                    m_channels[i].enabled = false;
+                }
+            }
+            break;
+        }
+        
+        case 0x3D: // NON (Noise Enable)
+            // Noise enable flags - stored in register, used when noise is implemented
+            break;
+            
+        case 0x4D: // PMON (Pitch Modulation Enable)
+            // Pitch modulation enable flags - stored in register
+            break;
+        
+        case 0x5D: // DIR (Sample Directory Address)
+            // Sample directory page - used when calculating source address
+            break;
+            
+        case 0x5E: // ESA (Echo Start Address)
+            // Echo buffer start address - used when echo is enabled
+            break;
+            
+        case 0x6C: // EDL (Echo Delay)
+            // Echo delay in samples - lower 4 bits
+            break;
+            
+        case 0x7C: // EFB (Echo Feedback)
+            // Echo feedback amount (signed) - used in echo processing
+            break;
+            
+        // FIR filter coefficients ($0E-$0F, $1E-$1F, ..., $7E-$7F)
+        // Each coefficient is signed 8-bit
+        case 0x0E: case 0x0F:
+        case 0x1E: case 0x1F:
+        case 0x2E: case 0x2F:
+        case 0x3E: case 0x3F:
+        case 0x4E: case 0x4F:
+        case 0x6E: case 0x6F:
+        case 0x7E: case 0x7F:
+            // FIR filter coefficients are stored and used during echo processing
+            break;
+    }
+}
                 // Slow decrease (simplified)
                 if ((m_spc700Cycles & 0xFF) == 0) {
                     ch.envLevel -= (sustainRate >> 1);
