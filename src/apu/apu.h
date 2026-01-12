@@ -101,6 +101,13 @@ private:
     uint8_t m_lastPort0Value;    // Last value written to Port 0 (for tracking byte transfers)
     uint16_t m_port0WrapCount;   // Number of times Port 0 value wrapped from high to low
     
+    // Auto-detect transfer complete
+    uint8_t m_autoDetectLastPort0;
+    int m_autoDetectSameCount;
+    uint8_t m_autoDetectLastPort1;
+    int m_autoDetectPort1SameCount;
+    uint64_t m_lastPort1WriteCycle;  // Last Port 1 write cycle
+    
     // Timers (3 timers) - Timer 0/1: 8kHz, Timer 2: 64kHz
     struct Timer {
         uint8_t counter;    // 4-bit counter (0-15)
@@ -118,6 +125,11 @@ private:
     // DSP State
     bool m_dspEnabled;
     uint8_t m_dspRegs[128]; // DSP registers
+    uint8_t m_konLatch;     // Latched KON bits
+    uint8_t m_koffLatch;    // Latched KOFF bits
+    uint16_t m_dirBase;     // DIR register base (ARAM offset)
+    int8_t m_masterVolL;    // MVOL L
+    int8_t m_masterVolR;    // MVOL R
     
     // Envelope states
     enum EnvelopeState {
@@ -131,7 +143,8 @@ private:
     // Audio output
     struct AudioChannel {
         bool enabled;
-        uint8_t volume;
+        int8_t volumeL;
+        int8_t volumeR;
         uint16_t frequency;
         uint8_t waveform;
         uint8_t phase;
@@ -159,7 +172,7 @@ private:
         bool keyOn;                 // Key On flag
         
         AudioChannel() 
-            : enabled(false), volume(0), frequency(0), waveform(0), phase(0)
+            : enabled(false), volumeL(0), volumeR(0), frequency(0), waveform(0), phase(0)
             , currentSample(0), sourceAddr(0), currentAddr(0)
             , brrBytePos(0), brrNibblePos(0), brrHeader(0)
             , pitch(0), samplePos(0), sampleStep(0), brrBufferIndex(0)

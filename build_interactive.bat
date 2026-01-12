@@ -1,10 +1,10 @@
 @echo off
-REM 일반 실행용 빌드 스크립트
+REM Interactive Debug 모드로 빌드
 
 REM 프로젝트 루트 디렉토리로 이동
 cd /d "%~dp0"
 
-echo Building SNES Emulator (Complete Version)...
+echo Building with Interactive Debugger...
 echo.
 
 REM Visual Studio 환경 설정 (Community 또는 Professional 버전 시도)
@@ -38,12 +38,14 @@ src\emulation\rom\rom_loader.cpp ^
 src\emulation\rom\rom_mapper.cpp ^
 src\io\video\video_output.cpp ^
 src\io\audio\audio_output.cpp ^
-src\debug\logger.cpp
+src\debug\logger.cpp ^
+src\debug\simple_debugger.cpp
 
 REM 컴파일
 cl /EHsc /std:c++17 /W3 ^
 /D_CRT_SECURE_NO_WARNINGS ^
 /DUSE_SDL ^
+/DENABLE_INTERACTIVE_DEBUG ^
 /DENABLE_LOGGING ^
 /I. /Iinclude ^
 /Ilib ^
@@ -58,14 +60,26 @@ if %ERRORLEVEL% EQU 0 (
     echo ========================================
     echo Build successful!
     echo.
-    echo Executable: snes_emu_complete.exe
+    echo Executable: snes_emu_debug.exe
     echo.
     echo Usage:
-    echo   snes_emu_complete.exe [rom_file.sfc]
+    echo   snes_emu_debug.exe spctest.sfc
+    echo.
+    echo Interactive commands will be available
+    echo during execution.
     echo ========================================
 ) else (
     echo.
     echo Build failed!
     pause
-    exit /b 1
 )
+
+
+
+
+
+
+
+
+
+

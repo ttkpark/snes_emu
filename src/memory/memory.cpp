@@ -1,6 +1,7 @@
 #include "memory.h"
 #include "../ppu/ppu.h"
 #include "../apu/apu.h"
+#include "../input/simple_input.h"
 #include "../debug/logger.h"
 #include <iostream>
 #include <iomanip>
@@ -11,6 +12,14 @@ Memory::Memory() : m_cpu(nullptr), m_ppu(nullptr), m_apu(nullptr), m_input(nullp
     m_wram.resize(128 * 1024, 0);
     m_sram.resize(32 * 1024, 0);
     m_romMapping = ROMMapping::Unknown;
+    m_autoJoypadEnabled = false;
+    for (int i = 0; i < 4; i++) {
+        m_joypadData[i] = 0;
+    }
+    // Initialize I/O registers
+    for (int i = 0; i < 0x200; i++) {
+        m_ioRegisters[i] = 0;
+    }
 }
 
 bool Memory::loadROM(const std::vector<uint8_t>& romData) {
@@ -111,7 +120,16 @@ uint8_t Memory::read8(uint32_t address) {
         
         // CPU I/O registers ($4200-$421F in banks $00-$3F and $80-$BF)
         if (offset >= 0x4200 && offset < 0x4220) {
-            // Forward to PPU (for NMI control)
+            // Auto-Joypad data registers ($4218-$421F)
+            if (offset >= 0x4218 && offset < 0x4220) {
+                int joypadIndex = (offset - 0x4218) / 2;
+                bool highByte = (offset & 0x01) != 0;
+                if (joypadIndex < 4) {
+                    return highByte ? ((m_joypadData[joypadIndex] >> 8) & 0xFF) : (m_joypadData[joypadIndex] & 0xFF);
+                }
+                return 0;
+            }
+            // Forward to PPU (for NMI control and other registers)
             if (m_ppu) {
                 return m_ppu->readRegister(offset);
             }
@@ -243,7 +261,19 @@ void Memory::write8(uint32_t address, uint8_t value) {
         }
         
         // Handle specific CPU I/O registers
-        if (offset == 0x420B) { // MDMAEN - DMA Enable
+        if (offset == 0x4200) { // NMITIMEN - NMI Enable and Auto-Joypad
+            // Bit 7: NMI Enable (forwarded to PPU)
+            // Bit 0: Auto-Joypad Enable
+            m_autoJoypadEnabled = (value & 0x01) != 0;
+            if (m_ppu) {
+                m_ppu->writeRegister(offset, value);
+            }
+            static bool warnedAutoJoypad = false;
+            if (!warnedAutoJoypad && m_autoJoypadEnabled) {
+                std::cout << "[INFO] Auto-Joypad enabled ($4200 bit 0) - Controller data is automatically stored in $4218-$421F during VBlank." << std::endl;
+                warnedAutoJoypad = true;
+            }
+        } else if (offset == 0x420B) { // MDMAEN - DMA Enable
             Logger::getInstance().logCPU("=== DMA ENABLE! value=" + std::to_string(value) + " ===");
             Logger::getInstance().flush();
             // std::cout << "PPU: DMA Enable=$" << std::hex << (int)value << std::dec << std::endl;
@@ -254,8 +284,13 @@ void Memory::write8(uint32_t address, uint8_t value) {
                 }
             }
         } else if (offset == 0x420C) { // HDMAEN - HDMA Enable
-            // std::cout << "PPU: HDMA Enable=$" << std::hex << (int)value << std::dec << std::endl;
-            // HDMA not implemented yet
+            // HDMA not implemented: Only store value and output warning once
+            static bool warnedHDMA = false;
+            if (!warnedHDMA) {
+                std::cout << "[WARN] HDMAEN($420C) not yet implemented - only value is preserved." << std::endl;
+                warnedHDMA = true;
+            }
+            m_ioRegisters[offset] = value;
         } else {
             // Forward to PPU (for NMI control)
             if (m_ppu) {
@@ -334,6 +369,13 @@ void Memory::performDMA(uint8_t channel) {
     
     // Get transfer mode (bits 2-0)
     uint8_t mode = dma.control & 0x07;
+    
+    // Warn about simplified DMA modes
+    static bool warnedDMAModes = false;
+    if (!warnedDMAModes && mode >= 2) {
+        std::cout << "[WARN] DMA Transfer Modes 2-7 are simplified; precise transfer patterns may not match hardware." << std::endl;
+        warnedDMAModes = true;
+    }
     
     // Calculate source address
     uint32_t sourceAddr = (dma.sourceBank << 16) | dma.sourceAddr;
@@ -602,4 +644,38 @@ uint32_t Memory::getROMAddress(uint32_t address, ROMMapping mapping) {
     }
     
     return 0xFFFFFFFF; // Invalid address
+}
+
+void Memory::performAutoJoypadRead() {
+    if (!m_autoJoypadEnabled || !m_input) {
+        return;
+    }
+    
+    // Auto-Joypad: Read controller data and store in $4218-$421F
+    // Real hardware takes ~134 cycles
+    if (m_input) {
+        // Controller 1: 16-bit read
+        uint16_t joy1 = 0;
+        m_input->writeStrobe(1);
+        m_input->writeStrobe(0);
+        for (int i = 0; i < 16; i++) {
+            uint8_t bit = m_input->readController1();
+            joy1 |= (bit << i);
+        }
+        m_joypadData[0] = joy1;
+        
+        // Controller 2: 16-bit read
+        uint16_t joy2 = 0;
+        m_input->writeStrobe(1);
+        m_input->writeStrobe(0);
+        for (int i = 0; i < 16; i++) {
+            uint8_t bit = m_input->readController2();
+            joy2 |= (bit << i);
+        }
+        m_joypadData[1] = joy2;
+        
+        // Controller 3-4: Multi-tap not implemented (set to 0)
+        m_joypadData[2] = 0;
+        m_joypadData[3] = 0;
+    }
 }

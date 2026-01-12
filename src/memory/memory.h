@@ -28,6 +28,9 @@ public:
     // DMA operations
     void performDMA(uint8_t channel);
     
+    // Auto-Joypad operations
+    void performAutoJoypadRead();
+    
     // ROM mapping detection
     enum class ROMMapping {
         LoROM,
@@ -67,6 +70,13 @@ private:
         uint8_t sourceBank;   // $43x4 - Source bank
         uint16_t size;        // $43x5-6 - Transfer size
     } m_dmaChannels[8];
+    
+    // Auto-Joypad state
+    bool m_autoJoypadEnabled;
+    uint16_t m_joypadData[4];  // 4 controllers, 16 bits each
+    
+    // I/O registers ($4200-$43FF)
+    uint8_t m_ioRegisters[0x200];
     
     uint32_t translateAddress(uint32_t address);
 };

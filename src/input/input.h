@@ -8,28 +8,28 @@ public:
     Input();
     ~Input();
     
-    // 입력 처리
+    // Input handling
     void update();
     void handleEvent(const SDL_Event& event);
     
-    // 버튼 상태 확인
+    // Button state check
     bool isPressed(uint8_t button) const;
     bool isJustPressed(uint8_t button) const;
     bool isJustReleased(uint8_t button) const;
     
-    // 키 매핑
+    // Key mapping
     void setKeyMapping(uint8_t button, SDL_Scancode key);
     SDL_Scancode getKeyMapping(uint8_t button) const;
     
-    // 게임패드 지원
+    // Gamepad support
     void setGamepadMapping(uint8_t button, uint8_t gamepadButton);
     bool isGamepadConnected() const;
     
-    // 입력 상태 리셋
+    // Reset input state
     void reset();
     
 private:
-    // SNES 버튼 정의
+    // SNES button definitions
     enum SNESButton {
         BUTTON_A = 0,
         BUTTON_B = 1,
@@ -45,7 +45,7 @@ private:
         BUTTON_RIGHT = 11
     };
     
-    // 버튼 상태
+    // Button state
     struct ButtonState {
         bool current;
         bool previous;
@@ -55,27 +55,27 @@ private:
     
     std::map<uint8_t, ButtonState> m_buttonStates;
     
-    // 키 매핑
+    // Key mapping
     std::map<uint8_t, SDL_Scancode> m_keyMappings;
     std::map<uint8_t, uint8_t> m_gamepadMappings;
     
-    // 게임패드
+    // Gamepad
     SDL_GameController* m_gameController;
     bool m_gamepadConnected;
     
-    // 기본 키 매핑 설정
+    // Default key mapping setup
     void setupDefaultMappings();
     
-    // 버튼 상태 업데이트
+    // Button state update
     void updateButtonState(uint8_t button, bool pressed);
     
-    // 키보드 입력 처리
+    // Keyboard input handling
     void handleKeyboardInput(const SDL_Event& event);
     
-    // 게임패드 입력 처리
+    // Gamepad input handling
     void handleGamepadInput(const SDL_Event& event);
     
-    // 내부 업데이트 함수들
+    // Internal update functions
     void updateKeyboardInput();
     void updateGamepadInput();
     bool initializeGamepad();

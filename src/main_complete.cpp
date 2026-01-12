@@ -366,6 +366,22 @@ int main(int argc, char* argv[]) {
         memcpy(name, romData.data() + headerPhysicalAddress, 21);
         name[21] = '\0';
         std::cout << "ROM Name: " << name << std::endl;
+
+        // Chipset detection ($FFD6)
+        if (headerPhysicalAddress + 0x16 < romData.size()) {
+            uint8_t chipset = romData[headerPhysicalAddress + 0x16];
+            uint8_t coprocessorNibble = (chipset >> 4) & 0x0F;
+            if (coprocessorNibble == 0x1) {
+                std::cout << "[WARN] SuperFX/GSU detected (chipset=0x" << std::hex << (int)chipset << std::dec
+                          << ") - not implemented; ROM may not run." << std::endl;
+            } else if (coprocessorNibble == 0x0) {
+                std::cout << "[WARN] DSP-1/2/3/4 detected (chipset=0x" << std::hex << (int)chipset << std::dec
+                          << ") - not implemented; ROM may not run." << std::endl;
+            } else if (coprocessorNibble == 0x3) {
+                std::cout << "[WARN] SA-1 detected (chipset=0x" << std::hex << (int)chipset << std::dec
+                          << ") - not implemented; ROM may not run." << std::endl;
+            }
+        }
         
         std::cout << "Detected Mapping: " << mappingType << std::endl;
         std::cout << "Vector Base: 0x" << std::hex << vectorBase << std::dec << std::endl;
@@ -618,7 +634,7 @@ int main(int argc, char* argv[]) {
         // Track counters for each component independently
         static int ppuCounter = 0;  // PPU runs every 4 master cycles
         static int cpuCounter = 0;   // CPU runs every 6 master cycles
-        static int apuCounter = 0;   // APU runs every 8 master cycles
+        static int apuCounter = 0;   // ⭐ APU runs every 24 master cycles (1.024 MHz) - FIXED!
         
         // Run one master clock cycle
         ppuCounter++;
@@ -627,9 +643,17 @@ int main(int argc, char* argv[]) {
         
         // PPU runs every 4 master cycles (5.37MHz) - Run PPU first to ensure scanline is updated
         // This ensures PPU progresses even when CPU is stuck in VBlank wait loop
+        static int lastScanline = -1;
         if (ppuCounter >= 4) {
             ppuCounter = 0;
+            int currentScanline = ppu.getScanline();
             ppu.step();
+            
+            // Perform Auto-Joypad read at VBlank start
+            if (lastScanline != 225 && ppu.getScanline() == 225) {
+                memory.performAutoJoypadRead();
+            }
+            lastScanline = ppu.getScanline();
         }
         
         // CPU runs every 6 master cycles (3.58MHz)
@@ -651,8 +675,8 @@ int main(int argc, char* argv[]) {
             }
         }
         
-        // APU runs every 8 master cycles (2.68MHz)
-        if (apuCounter >= 8) {
+        // ⭐ APU runs every 24 master cycles (1.024 MHz) - FIXED per apu_timing.md!
+        if (apuCounter >= 24) {
             apuCounter = 0;
             apu.step();
         }

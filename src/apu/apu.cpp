@@ -28,6 +28,11 @@ APU::APU()
     , m_spcExecAddr(0)
     , m_lastPort0Value(0xFF)
     , m_port0WrapCount(0)
+    , m_autoDetectLastPort0(0xFF)
+    , m_autoDetectSameCount(0)
+    , m_autoDetectLastPort1(0xFF)
+    , m_autoDetectPort1SameCount(0)
+    , m_lastPort1WriteCycle(0)
 #ifdef USE_SDL
     , m_audioDevice(0)
     , m_audioSpec(nullptr)
@@ -43,8 +48,13 @@ APU::APU()
         m_aram[0xF4 + i] = 0x00;  // SPC700 writes, CPU reads
     }
     
-    // Initialize DSP registers
+    // Initialize DSP registers/state
     memset(m_dspRegs, 0, sizeof(m_dspRegs));
+    m_konLatch = 0;
+    m_koffLatch = 0;
+    m_dirBase = 0;
+    m_masterVolL = 0x7F;
+    m_masterVolR = 0x7F;
     
     // Initialize audio channels
     for (int i = 0; i < 8; i++) {
@@ -201,6 +211,35 @@ void APU::reset() {
 }
 
 void APU::step() {
+    // Auto-detect IPL transfer complete (check if Port 1 writes have stopped)
+    if (m_spcLoadState == SPC_LOAD_RECEIVING && m_spcLoadIndex > 100) {
+        uint64_t cyclesSinceLastWrite = m_spc700Cycles - m_lastPort1WriteCycle;
+        if (cyclesSinceLastWrite > 2000) {  // No Port 1 writes for 2000 cycles
+            printf("========================================\n");
+            printf("APU: Auto-detected transfer complete!\n");
+            printf("  Received %d bytes to 0x%04X\n", m_spcLoadIndex, m_spcLoadAddr);
+            printf("  No Port 1 writes for %llu cycles\n", cyclesSinceLastWrite);
+            printf("========================================\n");
+            
+            m_spcLoadState = SPC_LOAD_WAIT_EXEC;
+            m_spcLoadSize = m_spcLoadIndex;
+            m_spcExecAddr = m_spcLoadAddr;
+            
+            // Disable IPL ROM and jump!
+            m_iplromEnable = false;
+            m_regs.pc = m_spcExecAddr;
+            m_spcLoadState = SPC_LOAD_COMPLETE;
+            m_bootComplete = true;
+            
+            printf("APU: IPL BOOT COMPLETE (auto)!\n");
+            printf("  Jumping to 0x%04X\n", m_spcExecAddr);
+            printf("  IPL ROM disabled\n");
+            printf("========================================\n");
+            
+            m_lastPort1WriteCycle = 0;
+        }
+    }
+    
     // Debug: Check if APU step is being called
     static int stepCount = 0;
     static bool firstLog = true;
@@ -277,14 +316,24 @@ uint8_t APU::readPort(uint8_t port) {
     // snes9x style: CPU reads from SPC ports
     // SPC700 writes to $F4-$F7, which are stored in m_aram[0xf4+port]
     // Return what SPC700 wrote to $F4-$F7
-    return m_aram[0xF4 + port];
+    uint8_t value = m_aram[0xF4 + port];
+    
+    // Debug: Log port 0 reads (especially during @wait5 loop)
+    if (port == 0) {
+        static int logCount = 0;
+        if (logCount < 50) {
+            std::cout << "APU: CPU read port 0 = 0x" << std::hex << (int)value 
+                      << " (m_aram[0xF4]=0x" << (int)m_aram[0xF4] << ")" << std::dec << std::endl;
+            logCount++;
+        }
+    }
+    
+    return value;
 }
 
 void APU::writePort(uint8_t port, uint8_t value) {
     if (port >= 4) return;
     
-    // snes9x style: CPU writes to ports, SPC700 reads them via $F4-$F7
-    // Store in m_cpuPorts[port] so SPC700 can read via readARAM($F4+port)
     uint8_t oldValue = m_cpuPorts[port];
     m_cpuPorts[port] = value;
     
@@ -310,55 +359,67 @@ void APU::writePort(uint8_t port, uint8_t value) {
             Logger::getInstance().logAPU(oss.str());
     }
     
-    // Handle IPL protocol for SPC program loading
-    if (m_bootComplete) {
-        if (port == 2) {
-            // Port 2: Low byte of address
-            // This can be written before or during protocol
-            std::ostringstream oss;
-            oss << "APU: Port 2 write: value=0x" << std::hex << (int)value << ", loadState=" << std::dec << (int)m_spcLoadState;
-            std::cout << oss.str() << std::endl;
-            Logger::getInstance().logPort(oss.str());
-            if (m_spcLoadState == SPC_LOAD_IDLE || m_spcLoadState == SPC_LOAD_WAIT_CC) {
-                // Store low byte, will be combined with high byte later
-                // But if data has already been loaded OR destination address is already set, this might be execution address
-                if (m_spcLoadSize > 0 || (m_spcLoadAddr != 0 && m_spcLoadAddr == m_spcExecAddr)) {
-                    // Data has been loaded OR we're reusing the same address, this is likely execution address
-                    m_spcExecAddr = value;
-                    std::ostringstream oss;
-                    oss << "APU: Execution address low byte (after data loaded): 0x" << std::hex << (int)value << std::dec;
-                    Logger::getInstance().logAPU(oss.str());
-                } else {
-                    // No data loaded yet, this is destination address
-                m_spcLoadAddr = value;
-                }
-            } else if (m_spcLoadState == SPC_LOAD_WAIT_EXEC || m_spcLoadState == SPC_LOAD_RECEIVING) {
-                // Execution address low byte (can be written during or after data transfer)
+    // Handle IPL protocol for SPC program loading (must run during boot!)
+    // Removed m_bootComplete condition!
+    if (port == 2) {
+        // Port 2: Low byte of address
+        // This can be written before or during protocol
+        std::ostringstream oss;
+        oss << "APU: Port 2 write: value=0x" << std::hex << (int)value << ", loadState=" << std::dec << (int)m_spcLoadState;
+        std::cout << oss.str() << std::endl;
+        Logger::getInstance().logPort(oss.str());
+        if (m_spcLoadState == SPC_LOAD_IDLE || m_spcLoadState == SPC_LOAD_WAIT_CC) {
+            // Store low byte, will be combined with high byte later
+            // If data has already been transferred, this is the execution address
+            // spctest.asm lines 252-253: Write execution address to ports 2/3 after data transfer completes
+            if (m_spcLoadSize > 0 || m_spcLoadIndex > 0 || (m_spcLoadAddr != 0 && m_spcLoadAddr == m_spcExecAddr)) {
+                // Data has been loaded OR we're reusing the same address, this is likely execution address
                 m_spcExecAddr = value;
                 std::ostringstream oss;
-                oss << "APU: Execution address low byte: 0x" << std::hex << (int)value << std::dec;
+                oss << "APU: Execution address low byte (after data loaded): 0x" << std::hex << (int)value << std::dec;
                 Logger::getInstance().logAPU(oss.str());
-                // Note: Execution address is not complete yet (need high byte from port 3)
-                // We'll check for execution command after high byte is written
-            } else if (m_spcLoadState == SPC_LOAD_COMPLETE) {
-                // After IPL protocol completes, port 2/3 can be used for communication
-                // This is not an execution address
             } else {
-                // If we're in RECEIVING state and data has been loaded, this might be execution address
-                // Check if we've received data (m_spcLoadSize > 0)
-                if (m_spcLoadSize > 0) {
-                    // This is likely execution address after data transfer
-                    m_spcExecAddr = value;
-                    std::ostringstream oss;
-                    oss << "APU: Execution address low byte (after data transfer): 0x" << std::hex << (int)value << std::dec;
-                    Logger::getInstance().logAPU(oss.str());
-                } else {
-                    std::ostringstream oss;
-                    oss << "APU: Port 2 write ignored (wrong state: " << (int)m_spcLoadState << ")";
-                    Logger::getInstance().logAPU(oss.str());
-                }
+                // No data loaded yet, this is destination address
+                m_spcLoadAddr = value;
             }
-        } else if (port == 3) {
+        } else if (m_spcLoadState == SPC_LOAD_WAIT_EXEC || m_spcLoadState == SPC_LOAD_RECEIVING) {
+            // Execution address low byte (can be written during or after data transfer)
+            m_spcExecAddr = value;
+            std::ostringstream oss;
+            oss << "APU: Execution address low byte: 0x" << std::hex << (int)value << std::dec;
+            Logger::getInstance().logAPU(oss.str());
+            // Note: Execution address is not complete yet (need high byte from port 3)
+            // We'll check for execution command after high byte is written
+        } else if (m_spcLoadState == SPC_LOAD_COMPLETE) {
+            // After IPL protocol completes, port 2/3 can be used for communication
+            // This is not an execution address
+        } else {
+            // If we're in RECEIVING state and data has been loaded, this might be execution address
+            // Check if we've received data (m_spcLoadSize > 0 or m_spcLoadIndex > 0)
+            if (m_spcLoadSize > 0 || m_spcLoadIndex > 0) {
+                // This is likely execution address after data transfer
+                m_spcExecAddr = value;
+                std::ostringstream oss;
+                oss << "APU: Execution address low byte (after data transfer): 0x" << std::hex << (int)value << std::dec;
+                Logger::getInstance().logAPU(oss.str());
+            } else {
+                std::ostringstream oss;
+                oss << "APU: Port 2 write ignored (wrong state: " << (int)m_spcLoadState << ")";
+                Logger::getInstance().logAPU(oss.str());
+            }
+        }
+    } else if (port == 3) {
+            // ⭐⭐�?Port 3: ?�송 ?�료 ?�호 체크!
+            if (value == 0x00 && m_spcLoadState == SPC_LOAD_RECEIVING) {
+                // �??�송 ?�료 ?�호!
+                printf("========================================\n");
+                printf("APU: Transfer complete (Port 3 = 0x00)\n");
+                printf("  Received %d bytes to 0x%04X\n", m_spcLoadIndex, m_spcLoadAddr);
+                printf("========================================\n");
+                m_spcLoadState = SPC_LOAD_WAIT_EXEC;
+                m_spcLoadSize = m_spcLoadIndex;
+            }
+            
             // Port 3: High byte of address
             std::ostringstream oss;
             oss << "APU: Port 3 write: value=0x" << std::hex << (int)value << ", loadState=" << std::dec << (int)m_spcLoadState;
@@ -372,13 +433,18 @@ void APU::writePort(uint8_t port, uint8_t value) {
                     << ", loadAddr=0x" << std::hex << m_spcLoadAddr << std::dec;
                 std::cout << oss.str() << std::endl;
                 Logger::getInstance().logPort(oss.str());
-                if (m_spcLoadSize > 0 || (m_spcLoadAddr != 0 && m_spcLoadAddr == m_spcExecAddr)) {
+                // If data has already been transferred, this is the execution address
+                // spctest.asm lines 252-253: Write execution address to ports 2/3 after data transfer completes
+                if (m_spcLoadSize > 0 || m_spcLoadIndex > 0 || (m_spcLoadAddr != 0 && m_spcLoadAddr == m_spcExecAddr)) {
                     // Data has been loaded OR we're reusing the same address, this is likely execution address
                     m_spcExecAddr |= (value << 8);
                     std::ostringstream oss;
                     oss << "APU: Execution address set (after data loaded): 0x" << std::hex << m_spcExecAddr << std::dec;
                     std::cout << oss.str() << std::endl;
                     Logger::getInstance().logPort(oss.str());
+                    // Set execution address in $00-$01 (so IPL ROM can read it)
+                    m_aram[0x00] = m_spcExecAddr & 0xFF;
+                    m_aram[0x01] = (m_spcExecAddr >> 8) & 0xFF;
                     // Check if execution command (size+2) was already written to port 0
                     // If so, process it now
                     std::ostringstream oss2;
@@ -401,41 +467,65 @@ void APU::writePort(uint8_t port, uint8_t value) {
                     }
                 } else {
                     // No data loaded yet, this is destination address
-                m_spcLoadAddr |= (value << 8);
+                    m_spcLoadAddr |= (value << 8);
                     std::ostringstream oss;
                     oss << "APU: Destination address set to 0x" << std::hex << m_spcLoadAddr << std::dec;
                     Logger::getInstance().logAPU(oss.str());
                 }
             } else if (m_spcLoadState == SPC_LOAD_WAIT_EXEC || m_spcLoadState == SPC_LOAD_RECEIVING) {
-                // Execution address high byte (can be written during or after data transfer)
+                // ⭐ Execution address high byte (can be written during or after data transfer)
+                // spctest.asm lines 252-253: Write execution address to ports 2/3 (after data transfer completes)
                 m_spcExecAddr |= (value << 8);
                 std::ostringstream oss;
                 oss << "APU: Execution address set to 0x" << std::hex << m_spcExecAddr << std::dec;
                 Logger::getInstance().logAPU(oss.str());
+                // Execution address is complete, so wait for execution command to be written to port 0
+                // Pre-set execution address in $00-$01 (so IPL ROM can read it)
+                m_aram[0x00] = m_spcExecAddr & 0xFF;
+                m_aram[0x01] = (m_spcExecAddr >> 8) & 0xFF;
+                
+                // If data transfer is complete (port 1 was 0x00 or we're in WAIT_EXEC state), jump immediately!
+                if (m_spcLoadState == SPC_LOAD_WAIT_EXEC || (m_spcLoadState == SPC_LOAD_RECEIVING && m_spcLoadIndex > 100)) {
+                    // Disable IPL ROM and jump!
+                    m_iplromEnable = false;
+                    m_regs.pc = m_spcExecAddr;
+                    m_spcLoadState = SPC_LOAD_COMPLETE;
+                    m_bootComplete = true;
+                    
+                    printf("========================================\n");
+                    printf("APU: IPL BOOT COMPLETE (exec addr in port 3)!\n");
+                    printf("  Loaded %d bytes to 0x%04X\n", m_spcLoadSize > 0 ? m_spcLoadSize : m_spcLoadIndex, m_spcLoadAddr);
+                    printf("  Jumping to 0x%04X\n", m_spcExecAddr);
+                    printf("  IPL ROM disabled\n");
+                    printf("========================================\n");
+                }
             } else if (m_spcLoadState == SPC_LOAD_COMPLETE) {
                 // After IPL protocol completes, port 2/3 can be used for communication
                 // This is not an execution address
             } else {
                 // If we're in RECEIVING state and data has been loaded, this might be execution address
-                // Check if we've received data (m_spcLoadSize > 0)
-                if (m_spcLoadSize > 0) {
+                // Check if we've received data (m_spcLoadSize > 0 or m_spcLoadIndex > 0)
+                if (m_spcLoadSize > 0 || m_spcLoadIndex > 0) {
                     // This is likely execution address after data transfer
                     m_spcExecAddr |= (value << 8);
                     std::ostringstream oss;
                     oss << "APU: Execution address set (after data transfer): 0x" << std::hex << m_spcExecAddr << std::dec;
                     Logger::getInstance().logAPU(oss.str());
-                // If we were in RECEIVING state and exec address is now complete, switch to WAIT_EXEC
-                if (m_spcLoadState == SPC_LOAD_RECEIVING) {
-                    m_spcLoadState = SPC_LOAD_WAIT_EXEC;
+                    // If we were in RECEIVING state and exec address is now complete, switch to WAIT_EXEC
+                    if (m_spcLoadState == SPC_LOAD_RECEIVING) {
+                        m_spcLoadState = SPC_LOAD_WAIT_EXEC;
                     }
-                // Check if execution command (size+2) was already written to port 0
-                // If so, process it now
+                    // Set execution address in $00-$01 (so IPL ROM can read it)
+                    m_aram[0x00] = m_spcExecAddr & 0xFF;
+                    m_aram[0x01] = (m_spcExecAddr >> 8) & 0xFF;
+                    // Check if execution command (size+2) was already written to port 0
+                    // If so, process it now
                     std::ostringstream oss2;
                     oss2 << "APU: Checking execution command: execAddr=0x" << std::hex << m_spcExecAddr 
                         << ", port0=0x" << (int)m_cpuPorts[0] << ", loadSize=" << std::dec << m_spcLoadSize;
                     Logger::getInstance().logAPU(oss2.str());
                     Logger::getInstance().logPort(oss2.str());
-                if (m_spcExecAddr != 0 && m_cpuPorts[0] >= m_spcLoadSize && m_cpuPorts[0] != 0) {
+                    if (m_spcExecAddr != 0 && m_cpuPorts[0] >= m_spcLoadSize && m_cpuPorts[0] != 0) {
                     // Execution command was already written, let IPL ROM handle it
                     // Set execution address in $00-$01 for IPL ROM's JMP instruction
                     m_aram[0x00] = m_spcExecAddr & 0xFF;
@@ -450,11 +540,26 @@ void APU::writePort(uint8_t port, uint8_t value) {
                     }
                 }
             }
-        } else if (port == 0) {
+    }  // Close port == 3 block
+    else if (port == 0) {
             // Port 0: Handshake and data transfer
             // During IPL protocol, IPL ROM handles the handshake and data transfer
-            // We just store the value so IPL ROM can read it via $F4
-            // IPL ROM will echo back the value when ready
+            // Update m_aram[0xF4] when CPU writes to port 0 (so SPC700 can read it)
+            // But after SPC700 writes Y to port 0, that value must be maintained
+            // In real hardware, when CPU writes to port 0, SPC700 can read it,
+            // but when SPC700 writes to port 0, CPU can read it.
+            // Therefore, always update when CPU writes to port 0 (maintain until SPC700 writes next)
+            if (m_spcLoadState == SPC_LOAD_RECEIVING) {
+                // During data transfer: CPU writes counter to port 0
+                // Update m_aram[0xF4] so SPC700 can read port 0
+                // When CPU writes a new counter, update to that value
+                // When SPC700 writes Y to port 0, it overwrites, but when CPU writes again, it updates again
+                m_aram[0xF4] = value;
+            } else if (m_spcLoadState == SPC_LOAD_IDLE || m_spcLoadState == SPC_LOAD_WAIT_CC) {
+                // Initialization phase: update when CPU writes to port 0
+                m_aram[0xF4] = value;
+            }
+            
             if (m_spcLoadState == SPC_LOAD_IDLE) {
                 // Wait for CPU to write 0xCC to start transfer
                 if (value == 0xCC) {
@@ -465,7 +570,7 @@ void APU::writePort(uint8_t port, uint8_t value) {
                         std::ostringstream oss;
                         oss << "APU: Execution address set to destination address: 0x" << std::hex << m_spcExecAddr << std::dec;
                         Logger::getInstance().logAPU(oss.str());
-                }
+                    }
                     std::ostringstream oss;
                     oss << "APU: IPL protocol started, destination address=0x" << std::hex << m_spcLoadAddr << std::dec;
                     Logger::getInstance().logAPU(oss.str());
@@ -507,6 +612,7 @@ void APU::writePort(uint8_t port, uint8_t value) {
                 
                 // Check if this is the execution command
                 // Execution command is (size+2), written after data transfer completes
+                // spctest.asm lines 252-257: Write execution address to ports 2/3, then write size+2 to port 0
                 // During data transfer, value changes sequentially (0, 1, 2, ..., 255, 0, 1, ...)
                 // After data transfer, value should be size+2
                 // 
@@ -516,36 +622,44 @@ void APU::writePort(uint8_t port, uint8_t value) {
                 // - If value is much different: likely execution command
                 
                 bool isExecutionCommand = false;
-                if (m_spcExecAddr != 0) {
-                    // Get expected next value for normal sequential transfer
+                
+                // If execution address is set and port 0 value is similar to size+2, it's an execution command
+                if (m_spcExecAddr != 0 && m_spcLoadIndex > 0) {
+                    // Execution command = size + 2
+                    uint16_t expectedExecutionCommand = (m_spcLoadIndex + 2) & 0xFF;
                     uint8_t expectedValue = (m_spcLoadIndex + 1) & 0xFF;
                     
-                    // If value doesn't match expected, it might be execution command
-                    // But be careful: value could be current index if we just started
+                    // Method 1: If value matches or is similar to size+2, it's an execution command
+                    if (value == expectedExecutionCommand || 
+                        value == ((expectedExecutionCommand + 1) & 0xFF) ||
+                        value == ((expectedExecutionCommand - 1) & 0xFF)) {
+                        isExecutionCommand = true;
+                    }
                     
-                    // Execution command is typically larger than transfer size
-                    // Transfer size is usually small (<64KB), and execution command = size+2
-                    // So execution command should be within reasonable range
-                    
-                    // Method 1: value doesn't match sequential progression
-                    // For wrap-around: if wrap just happened, value might be 0
-                    if (value != expectedValue && value != (m_spcLoadIndex & 0xFF)) {
-                        // Check if it looks like an execution command
+                    // Method 2: If value differs from sequential progression and is within size+2 range, it's an execution command
+                    if (!isExecutionCommand && value != expectedValue && value != (m_spcLoadIndex & 0xFF)) {
                         // Execution command should be: transferredBytes + 2
-                        uint16_t executionCommandValue = (m_spcLoadIndex & 0xFF) + 2;
-                        if ((value == (executionCommandValue & 0xFF)) || 
-                            (value == ((executionCommandValue + 1) & 0xFF))) {
+                        uint16_t executionCommandValue = (m_spcLoadIndex + 2) & 0xFF;
+                        if ((value == executionCommandValue) || 
+                            (value == ((executionCommandValue + 1) & 0xFF)) ||
+                            (value == ((executionCommandValue - 1) & 0xFF))) {
                             isExecutionCommand = true;
                         }
                     }
                     
-                    // Method 2: if we've received a lot of data and value doesn't match
+                    // Method 3: if we've received a lot of data and value doesn't match sequential progression
                     // Likely an execution command
-                    if (!isExecutionCommand && m_spcLoadIndex > 256) {
+                    if (!isExecutionCommand && m_spcLoadIndex > 100) {
                         uint8_t lastTransferredValue = m_spcLoadIndex & 0xFF;
-                        // If value is much larger or smaller, it's probably execution command
-                        if (value > (lastTransferredValue + 2) || value < (lastTransferredValue - 2)) {
-                            isExecutionCommand = true;
+                        // If value is much larger or smaller than expected, it's probably execution command
+                        // But allow some tolerance for wrap-around
+                        int diff = (value - lastTransferredValue) & 0xFF;
+                        if (diff > 2 && diff < 250) {  // Not sequential, but not wrap-around
+                            // Check if it's in the execution command range (size+2)
+                            uint8_t execCmd = (m_spcLoadIndex + 2) & 0xFF;
+                            if ((value == execCmd) || (value == ((execCmd + 1) & 0xFF)) || (value == ((execCmd - 1) & 0xFF))) {
+                                isExecutionCommand = true;
+                            }
                         }
                     }
                 }
@@ -648,7 +762,35 @@ void APU::writePort(uint8_t port, uint8_t value) {
                     // Normal data transfer - just store the value for IPL ROM to read
                     // IPL ROM will echo it back
                 }
-            } else if (m_spcLoadState == SPC_LOAD_WAIT_EXEC) {
+            }
+            else if (m_spcLoadState == SPC_LOAD_WAIT_EXEC) {
+                // ⭐⭐�??�행 주소 ?�신 �?IPL ROM 비활?�화!
+                // Removed unnecessary port check - we're already in port == 0 block
+                if (false) {  // This block is disabled
+                    // Port 0 = ?�행 주소 Low byte
+                    m_spcExecAddr = (m_spcExecAddr & 0xFF00) | value;
+                    printf("APU: Exec address low = 0x%02X\n", value);
+                }
+                // Removed else if (port == 1) - unreachable code (we're in port == 0 block)
+                if (false) {  // Disabled
+                    // Port 1 = ?�행 주소 High byte
+                    m_spcExecAddr = (m_spcExecAddr & 0x00FF) | (value << 8);
+                    printf("APU: Exec address high = 0x%02X (exec=0x%04X)\n", value, m_spcExecAddr);
+                    
+                    // ⭐⭐�?IPL ROM 비활?�화 & ?�로그램 ?�프!
+                    m_iplromEnable = false;
+                    m_regs.pc = m_spcExecAddr;
+                    m_spcLoadState = SPC_LOAD_COMPLETE;
+                    m_bootComplete = true;
+                    
+                    printf("========================================\n");
+                    printf("APU: IPL BOOT COMPLETE!\n");
+                    printf("  Loaded %d bytes to 0x%04X\n", m_spcLoadSize, m_spcLoadAddr);
+                    printf("  Jumping to 0x%04X\n", m_spcExecAddr);
+                    printf("  IPL ROM disabled\n");
+                    printf("========================================\n");
+                }
+                
                 // IPL ROM is handling the echo and jump
                 // Don't interfere - let IPL ROM execute
                 // IPL ROM will:
@@ -664,7 +806,8 @@ void APU::writePort(uint8_t port, uint8_t value) {
                     Logger::getInstance().logAPU(oss.str());
                 }
             }
-        } else if (port == 1) {
+    }  // Close port == 0 block - verified correct
+    else if (port == 1) {
             // Port 1: Data byte during transfer
             // In real hardware, CPU writes data to port 1, and IPL ROM reads it via $F5
             // We just store the value in m_cpuPorts[1] so IPL ROM can read it
@@ -677,11 +820,96 @@ void APU::writePort(uint8_t port, uint8_t value) {
                 m_spcLoadIndex = 0;
                 m_spcLoadSize = 0; // We don't know size yet, will track by data received
             }
-            
+            else if (m_spcLoadState == SPC_LOAD_RECEIVING) {
+                // spctest.asm line 254: Setting port 1 to 0 signals data transfer complete
+                // After data transfer completes, execution address is written to ports 2/3, and port 1 is set to 0
+                // However, port 1 may be set to 0 during data transfer,
+                // so only recognize as transfer complete after sufficient data has been transferred
+                if (value == 0x00 && m_spcLoadIndex > 100) {
+                    // Data transfer complete signal!
+                    printf("========================================\n");
+                    printf("APU: Transfer complete (Port 1 = 0x00 after data transfer)\n");
+                    printf("  Received %d bytes to 0x%04X\n", m_spcLoadIndex, m_spcLoadAddr);
+                    printf("========================================\n");
+                    m_spcLoadState = SPC_LOAD_WAIT_EXEC;
+                    m_spcLoadSize = m_spcLoadIndex;
+                    
+                    // If execution address is already set (from ports 2/3), jump immediately
+                    // Otherwise, wait for execution address to be written to ports 2/3
+                    if (m_spcExecAddr != 0) {
+                        // Execution address is already set, disable IPL ROM and jump!
+                        m_iplromEnable = false;
+                        m_regs.pc = m_spcExecAddr;
+                        m_spcLoadState = SPC_LOAD_COMPLETE;
+                        m_bootComplete = true;
+                        
+                        printf("APU: IPL BOOT COMPLETE (port1=0x00)!\n");
+                        printf("  Jumping to 0x%04X\n", m_spcExecAddr);
+                        printf("  IPL ROM disabled\n");
+                        printf("========================================\n");
+                    } else {
+                        // Execution address will be written to ports 2/3 next
+                        // It will be handled in the port 2/3 write handler
+                        printf("APU: Waiting for execution address in ports 2/3...\n");
+                    }
+                }
+                // Receiving data - store in ARAM!
+                uint16_t dest_addr = m_spcLoadAddr + m_spcLoadIndex;
+                if (dest_addr < 0xFFC0) {  // Exclude IPL ROM area
+                    m_aram[dest_addr] = value;
+                    m_spcLoadIndex++;
+                    
+                    // Record Port 1 write time
+                    m_lastPort1WriteCycle = m_spc700Cycles;
+                    
+                    if (m_spcLoadIndex % 256 == 0) {
+                        printf("APU: Received %d bytes\n", m_spcLoadIndex);
+                    }
+                }
+                
+                // Port 0 is written directly by SPC700 IPL ROM routine with Y value (MOV dp,Y at 0xffe0)
+                // The value CPU writes to port 0 is the initial counter, and SPC700 writing Y to port 0 is the ACK
+                // Therefore, don't overwrite port 0 here - the value written by SPC700 must be maintained
+                
+                // Auto-detect transfer complete: If CPU no longer writes to Port 1, it's complete
+                if (value == m_autoDetectLastPort1) {
+                    m_autoDetectPort1SameCount++;
+                    if (m_autoDetectPort1SameCount > 50 && m_spcLoadIndex > 100) {  // Lowered to 50!
+                        // Port 1 hasn't changed for 300+ times → transfer complete!
+                        printf("========================================\n");
+                        printf("APU: Auto-detected transfer complete (Port 1 stalled)\n");
+                        printf("  Received %d bytes to 0x%04X\n", m_spcLoadIndex, m_spcLoadAddr);
+                        printf("  Last Port 1 value: 0x%02X\n", m_autoDetectLastPort1);
+                        printf("========================================\n");
+                        
+                        m_spcLoadState = SPC_LOAD_WAIT_EXEC;
+                        m_spcLoadSize = m_spcLoadIndex;
+                        m_spcExecAddr = m_spcLoadAddr;  // Execution address = load address
+                        
+                        // Immediately disable IPL ROM and jump!
+                        m_iplromEnable = false;
+                        m_regs.pc = m_spcExecAddr;
+                        m_spcLoadState = SPC_LOAD_COMPLETE;
+                        m_bootComplete = true;
+                        
+                        printf("APU: IPL BOOT COMPLETE (auto-port1)!\n");
+                        printf("  Jumping to 0x%04X\n", m_spcExecAddr);
+                        printf("  IPL ROM disabled\n");
+                        printf("========================================\n");
+                        
+                        m_autoDetectPort1SameCount = 0;
+                    }
+                } else {
+                    m_autoDetectPort1SameCount = 0;
+                }
+                m_autoDetectLastPort1 = value;
+                
+                // (Removed previous Port 0-based detection - Port 1-based is more accurate)
+            }
+
             // Note: We don't write to ARAM here
             // IPL ROM will read port 1 ($F5) and write to ARAM itself
             // This allows IPL ROM to control the data transfer protocol
-        }
     }
     
     // Simplified boot sequence handling
@@ -694,7 +922,7 @@ void APU::writePort(uint8_t port, uint8_t value) {
             Logger::getInstance().logAPU(oss.str());
         }
     }
-}
+}  // End of writePort function
 
 void APU::updateState() {
     // Update APU state based on current conditions
@@ -791,13 +1019,14 @@ void APU::executeSPC700Instruction() {
     uint8_t savedPSW = m_regs.psw;
     
     // Get operand length and read operands for logging
+    // NOTE: Don't increment PC here - instruction handlers will increment PC
     int operandLength = getSPC700OperandLength(opcode);
     std::vector<uint8_t> operands;
     for (int i = 0; i < operandLength; i++) {
         operands.push_back(readARAM(m_regs.pc + 1 + i));
     }
     
-    m_regs.pc++;
+    // PC will be incremented by instruction handlers (e.g., readARAM(m_regs.pc++))
     
     // Debug: Dump SPC memory at 0x0300 when first executing
     if (m_spcLoadState == SPC_LOAD_COMPLETE && savedPC == 0x0300) {
@@ -811,6 +1040,7 @@ void APU::executeSPC700Instruction() {
                 if (i % 16 == 15) std::cout << std::endl;
             }
             std::cout << std::dec << std::endl;
+            std::cout << "APU: Starting SPC program execution at PC=0x0300" << std::endl;
         }
     }
     
@@ -1066,6 +1296,19 @@ void APU::executeSPC700Instruction() {
             oss << "UNK_0x" << std::hex << std::setw(2) << std::setfill('0') << (int)opcode;
             opcodeName = oss.str();
             break;
+        }
+    }
+    
+    // Debug: Log first few instructions after boot complete
+    if (m_spcLoadState == SPC_LOAD_COMPLETE && savedPC >= 0x0300 && savedPC < 0x0310) {
+        static int logCount = 0;
+        if (logCount < 10) {
+            std::cout << "[SPC] PC=0x" << std::hex << savedPC << " | " << std::setw(2) << (int)opcode;
+            for (size_t i = 0; i < operands.size(); i++) {
+                std::cout << " " << std::setw(2) << (int)operands[i];
+            }
+            std::cout << " | " << opcodeName << std::dec << std::endl;
+            logCount++;
         }
     }
     
@@ -3278,17 +3521,37 @@ void APU::updateTimers() {
 void APU::updateDSP() {
     if (!m_dspEnabled) return;
     
-    // Update DSP processing
-    // Handle DSP register writes
-    for (int i = 0; i < 8; i++) {
-        // Check if channel is enabled
-        if (m_dspRegs[0x4C + i] & 0x80) { // Channel enable bit
-            m_channels[i].enabled = true;
-            m_channels[i].volume = m_dspRegs[0x0C + i]; // Volume register
-            m_channels[i].frequency = (m_dspRegs[0x2C + i] << 8) | m_dspRegs[0x3C + i]; // Frequency
-        } else {
-            m_channels[i].enabled = false;
+    // Apply pending KON/KOFF latches
+    if (m_konLatch) {
+        for (int ch = 0; ch < 8; ch++) {
+            if (m_konLatch & (1 << ch)) {
+                m_channels[ch].keyOn = true;
+                m_channels[ch].enabled = true;
+            }
         }
+        m_konLatch = 0;
+    }
+    if (m_koffLatch) {
+        for (int ch = 0; ch < 8; ch++) {
+            if (m_koffLatch & (1 << ch)) {
+                m_channels[ch].enabled = false;
+                m_channels[ch].envState = ENV_DIRECT;
+                m_channels[ch].envLevel = 0;
+            }
+        }
+        m_koffLatch = 0;
+    }
+
+    // Update cached volumes/pitch/master volume from DSP regs
+    m_masterVolL = (int8_t)m_dspRegs[0x0C];
+    m_masterVolR = (int8_t)m_dspRegs[0x1C];
+
+    for (int i = 0; i < 8; i++) {
+        int base = i * 0x10;
+        AudioChannel& ch = m_channels[i];
+        ch.volumeL = (int8_t)m_dspRegs[base + 0x00];
+        ch.volumeR = (int8_t)m_dspRegs[base + 0x01];
+        ch.pitch = (uint16_t)(m_dspRegs[base + 0x02] | ((m_dspRegs[base + 0x03] & 0x3F) << 8));
     }
 }
 
@@ -3345,7 +3608,7 @@ void APU::loadBootROM() {
     // This ensures Z flag is updated correctly for BNE at 0xFFD9
     // Original: 0xFFD6: 0xEB (MOV Y,dp) - doesn't update Z flag
     // Modified: 0xFFD6: 0xE4 (MOV A,dp) - updates Z flag
-    //           0xFFD8: 0xFD (MOV Y,A) - updates Z flag, Y = A (포트 0 값)
+    //           0xFFD8: 0xFD (MOV Y,A) - updates Z flag, Y = A (?�트 0 �?
     //           0xFFD9: 0xD0 (BNE rel) - checks Z flag
     //           0xFFDA: 0xFC (operand, -4) - branch back to 0xFFD6
     uint8_t iplROM[64] = {
@@ -3427,9 +3690,9 @@ void APU::generateAudio() {
                 // Envelope level is 0x0000-0x7FFF (15-bit)
                 int32_t finalSample = (brrSample * ch.envLevel) / 0x8000;
                 
-                // Apply volume and mix
-                int8_t volumeL = (int8_t)dsp[i * 0x10 + 0x00]; // VOL L (signed)
-                int8_t volumeR = (int8_t)dsp[i * 0x10 + 0x01]; // VOL R (signed)
+                // Apply volume and mix (cached from DSP regs)
+                int8_t volumeL = ch.volumeL;
+                int8_t volumeR = ch.volumeR;
                 
                 mixedSampleL += (finalSample * volumeL) / 128;
                 mixedSampleR += (finalSample * volumeR) / 128;
@@ -3444,10 +3707,8 @@ void APU::generateAudio() {
         
         // Apply master volume (only if channels are enabled, not for test tone)
         if (anyChannelEnabled) {
-            int8_t masterVolL = (int8_t)m_dspRegs[0x0C]; // MVOL L
-            int8_t masterVolR = (int8_t)m_dspRegs[0x1C]; // MVOL R
-            mixedSampleL = (mixedSampleL * masterVolL) / 128;
-            mixedSampleR = (mixedSampleR * masterVolR) / 128;
+            mixedSampleL = (mixedSampleL * m_masterVolL) / 128;
+            mixedSampleR = (mixedSampleR * m_masterVolR) / 128;
         }
         
         // Clamp to prevent overflow
@@ -3474,9 +3735,11 @@ void APU::processAudioChannel(int channel) {
     AudioChannel& ch = m_channels[channel];
     
     // Simple waveform generation
-    if (ch.enabled && ch.volume > 0) {
+    // Calculate average volume from left and right channels
+    int8_t avgVolume = (ch.volumeL + ch.volumeR) / 2;
+    if (ch.enabled && avgVolume > 0) {
         // Generate a simple sine wave
-        int16_t sample = (int16_t)(ch.volume * 32 * sin(ch.phase * 3.14159 / 128.0));
+        int16_t sample = (int16_t)(avgVolume * 32 * sin(ch.phase * 3.14159 / 128.0));
         
         // Add to audio buffer
         if (m_audioBufferPos < m_audioBuffer.size()) {
@@ -3745,6 +4008,11 @@ void APU::writeARAM(uint16_t addr, uint8_t value) {
             uint8_t port = addr - 0xF4;
             uint8_t oldValue = m_aram[addr];
             m_aram[addr] = value;
+            
+            // Special handling for port 0: When SPC700 writes Y to port 0, CPU should be able to read it
+            // The value CPU wrote to port 0 is stored in m_cpuPorts[0],
+            // but when SPC700 writes to port 0, that value should take priority (so CPU can read it)
+            // Therefore, m_aram[0xF4] always maintains the latest value (written by CPU or SPC700)
             
             // Debug: Log port writes from SPC700 (especially port 0)
             if (port == 0 || (port < 4 && value != oldValue)) {
@@ -4122,8 +4390,10 @@ void APU::handleDSPRegisterWrite(uint8_t addr, uint8_t value, uint8_t oldValue) 
     // Global registers
     switch (addr) {
         case 0x0C: // MVOL L (Master Volume Left, signed)
+            m_masterVolL = (int8_t)value;
+            break;
         case 0x1C: // MVOL R (Master Volume Right, signed)
-            // Master volume is applied during mixing
+            m_masterVolR = (int8_t)value;
             break;
             
         case 0x2C: // EVOL L (Echo Volume Left, signed)
@@ -4132,24 +4402,13 @@ void APU::handleDSPRegisterWrite(uint8_t addr, uint8_t value, uint8_t oldValue) 
             break;
             
         case 0x4C: { // KON (Key On)
-            // Key On - start playback for enabled channels
-            for (int i = 0; i < 8; i++) {
-                if (value & (1 << i)) {
-                    m_channels[i].keyOn = true;
-                    m_channels[i].enabled = true;
-                }
-            }
+            // Latch and process later in updateDSP (closer to HW timing)
+            m_konLatch |= value;
             break;
         }
         
         case 0x5C: { // KOF (Key Off)
-            // Key Off - enter release phase for enabled channels
-            for (int i = 0; i < 8; i++) {
-                if (value & (1 << i)) {
-                    m_channels[i].envState = ENV_RELEASE;
-                    m_channels[i].keyOn = false;
-                }
-            }
+            m_koffLatch |= value;
             break;
         }
         
@@ -4179,7 +4438,8 @@ void APU::handleDSPRegisterWrite(uint8_t addr, uint8_t value, uint8_t oldValue) 
             break;
         
         case 0x5D: // DIR (Sample Directory Address)
-            // Sample directory page - used when calculating source address
+            // DIR * 0x100 points to sample directory in ARAM
+            m_dirBase = ((uint16_t)value) << 8;
             break;
             
         case 0x5E: // ESA (Echo Start Address)
@@ -4207,227 +4467,4 @@ void APU::handleDSPRegisterWrite(uint8_t addr, uint8_t value, uint8_t oldValue) 
             break;
     }
 }
-                // Slow decrease (simplified)
-                if ((m_spc700Cycles & 0xFF) == 0) {
-                    ch.envLevel -= (sustainRate >> 1);
-                    if (ch.envLevel < 0) ch.envLevel = 0;
-                }
-            }
-            break;
-        }
-        
-        case ENV_RELEASE: {
-            // Release: decrease to 0
-            if (ch.envLevel > 0) {
-                ch.envLevel -= 0x40; // Fast release (simplified)
-                if (ch.envLevel < 0) {
-                    ch.envLevel = 0;
-                    ch.enabled = false;
-                }
-            }
-            break;
-        }
-        
-        case ENV_DIRECT: {
-            // Direct mode: use volume directly
-            uint8_t vol = dsp[channel * 0x10 + 0x00]; // VOL L
-            ch.envLevel = vol * 0x80;
-            break;
-        }
-    }
-}
 
-int16_t APU::getSampleWithPitch(int channel) {
-    AudioChannel& ch = m_channels[channel];
-    
-    // Advance sample position by step
-    ch.samplePos += ch.sampleStep;
-    
-    // Extract integer and fractional parts (16.16 fixed point)
-    uint16_t sampleIndex = (ch.samplePos >> 16) & 0xFFFF;
-    uint16_t fraction = ch.samplePos & 0xFFFF;
-    
-    // While we need more samples in the buffer
-    while (sampleIndex >= 16) {
-        // Decode next BRR block (16 samples)
-        for (int i = 0; i < 16; i++) {
-            ch.brrBuffer[i] = decodeBRR(channel);
-        }
-        sampleIndex -= 16;
-        ch.samplePos -= (16 << 16); // Adjust position
-    }
-    
-    // Get current and next sample for interpolation
-    int16_t sample0 = ch.brrBuffer[sampleIndex];
-    int16_t sample1 = (sampleIndex < 15) ? ch.brrBuffer[sampleIndex + 1] : decodeBRR(channel);
-    
-    // Linear interpolation
-    // result = sample0 + (sample1 - sample0) * fraction / 65536
-    int32_t diff = sample1 - sample0;
-    int32_t interpolated = sample0 + ((diff * fraction) >> 16);
-    
-    // Clamp to 16-bit range
-    int16_t result = (int16_t)std::min(32767, std::max(-32768, interpolated));
-    
-    return result;
-}
-
-// DSP Register Mapping:
-// Channels: $00-$0F (ch0), $10-$1F (ch1), ..., $70-$7F (ch7)
-//   Each channel: VOL L($00), VOL R($01), PITCH L($02), PITCH H($03), 
-//                  SRCN($04), ADSR1($05), ADSR2($06), GAIN($07)
-// Global registers:
-//   $0C: MVOL L (Master Volume Left)
-//   $1C: MVOL R (Master Volume Right)
-//   $2C: EVOL L (Echo Volume Left)
-//   $3C: EVOL R (Echo Volume Right)
-//   $4C: KON (Key On - bits 0-7 = channels 0-7)
-//   $5C: KOF (Key Off - bits 0-7 = channels 0-7)
-//   $5D: DIR (Sample Directory Address - page $XX00)
-//   $5E: ESA (Echo Start Address - page $XX00)
-//   $6C: EDL (Echo Delay - lower 4 bits)
-//   $7C: EFB (Echo Feedback - signed)
-//   $0D: EON (Echo Enable - bits 0-7 = channels 0-7)
-//   $2D: FLG (Reset/Mute/Noise clock - bit 7=mute, bit 6=reset)
-//   $3D: NON (Noise Enable - bits 0-7 = channels 0-7)
-//   $4D: PMON (Pitch Modulation Enable - bits 0-7 = channels 0-7)
-//   $5D: DIR (already mentioned)
-//   $6D: KOF (already mentioned)
-//   $7D: KOF (duplicate?)
-//   $0E-$0F: FIR filter coefficients
-//   $1E-$1F: FIR filter coefficients
-//   $2E-$2F: FIR filter coefficients
-//   $3E-$3F: FIR filter coefficients
-//   $4E-$4F: FIR filter coefficients
-//   $5E-$5F: FIR filter coefficients (ESA overlaps)
-//   $6E-$6F: FIR filter coefficients
-//   $7E-$7F: FIR filter coefficients
-
-void APU::handleDSPRegisterWrite(uint8_t addr, uint8_t value, uint8_t oldValue) {
-    // Channel-specific registers (each channel uses $00-$0F, $10-$1F, etc.)
-    if ((addr & 0x0F) < 0x08) {
-        int channel = addr >> 4;
-        if (channel < 8) {
-            uint8_t reg = addr & 0x0F;
-            
-            switch (reg) {
-                case 0x00: // VOL L (signed, -128 to +127)
-                case 0x01: // VOL R (signed, -128 to +127)
-                    // Volume registers are read during audio generation
-                    break;
-                    
-                case 0x02: // PITCH L (low byte of 14-bit pitch)
-                case 0x03: // PITCH H (high byte of 14-bit pitch, bits 6-7)
-                    // Pitch registers are used in pitch calculation
-                    break;
-                    
-                case 0x04: // SRCN (Sample Number, 0-255)
-                    // Source number is used when key is pressed
-                    break;
-                    
-                case 0x05: { // ADSR1 (Attack Rate[4], Decay Rate[3])
-                    // ADSR1 is used in envelope processing
-                    break;
-                }
-                    
-                case 0x06: { // ADSR2 (Sustain Rate[5], Sustain Level[3])
-                    // Extract sustain level (bits 5-7)
-                    m_channels[channel].sustainLevel = (value >> 5) & 0x07;
-                    break;
-                }
-                    
-                case 0x07: // GAIN (Gain mode and value)
-                    // GAIN is used for direct volume control mode
-                    break;
-            }
-        }
-    }
-    
-    // Global registers
-    switch (addr) {
-        case 0x0C: // MVOL L (Master Volume Left, signed)
-        case 0x1C: // MVOL R (Master Volume Right, signed)
-            // Master volume is applied during mixing
-            break;
-            
-        case 0x2C: // EVOL L (Echo Volume Left, signed)
-        case 0x3C: // EVOL R (Echo Volume Right, signed)
-            // Echo volume is used when echo is enabled
-            break;
-            
-        case 0x4C: { // KON (Key On)
-            // Key On - start playback for enabled channels
-            for (int i = 0; i < 8; i++) {
-                if (value & (1 << i)) {
-                    m_channels[i].keyOn = true;
-                    m_channels[i].enabled = true;
-                }
-            }
-            break;
-        }
-        
-        case 0x5C: { // KOF (Key Off)
-            // Key Off - enter release phase for enabled channels
-            for (int i = 0; i < 8; i++) {
-                if (value & (1 << i)) {
-                    m_channels[i].envState = ENV_RELEASE;
-                    m_channels[i].keyOn = false;
-                }
-            }
-            break;
-        }
-        
-        case 0x0D: // EON (Echo Enable)
-            // Echo enable flags - stored in register, used during echo processing
-            break;
-            
-        case 0x2D: { // FLG (Flags)
-            // Bit 7: MUTE (mute all channels)
-            // Bit 6: ECEN (Echo Enable - master enable)
-            // Bit 5-0: Noise clock divider
-            if (value & 0x80) {
-                // Mute all channels
-                for (int i = 0; i < 8; i++) {
-                    m_channels[i].enabled = false;
-                }
-            }
-            break;
-        }
-        
-        case 0x3D: // NON (Noise Enable)
-            // Noise enable flags - stored in register, used when noise is implemented
-            break;
-            
-        case 0x4D: // PMON (Pitch Modulation Enable)
-            // Pitch modulation enable flags - stored in register
-            break;
-        
-        case 0x5D: // DIR (Sample Directory Address)
-            // Sample directory page - used when calculating source address
-            break;
-            
-        case 0x5E: // ESA (Echo Start Address)
-            // Echo buffer start address - used when echo is enabled
-            break;
-            
-        case 0x6C: // EDL (Echo Delay)
-            // Echo delay in samples - lower 4 bits
-            break;
-            
-        case 0x7C: // EFB (Echo Feedback)
-            // Echo feedback amount (signed) - used in echo processing
-            break;
-            
-        // FIR filter coefficients ($0E-$0F, $1E-$1F, ..., $7E-$7F)
-        // Each coefficient is signed 8-bit
-        case 0x0E: case 0x0F:
-        case 0x1E: case 0x1F:
-        case 0x2E: case 0x2F:
-        case 0x3E: case 0x3F:
-        case 0x4E: case 0x4F:
-        case 0x6E: case 0x6F:
-        case 0x7E: case 0x7F:
-            // FIR filter coefficients are stored and used during echo processing
-            break;
-    }
-}

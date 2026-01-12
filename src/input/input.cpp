@@ -5,10 +5,10 @@ Input::Input()
     : m_gameController(nullptr)
     , m_gamepadConnected(false) {
     
-    // 기본 키 매핑 설정
+    // Default key mapping setup
     setupDefaultMappings();
     
-    // 게임패드 초기화
+    // Gamepad initialization
     initializeGamepad();
 }
 
@@ -19,16 +19,16 @@ Input::~Input() {
 }
 
 void Input::update() {
-    // 이전 상태 저장
+    // Save previous state
     for (auto& [button, state] : m_buttonStates) {
         state.previous = state.current;
     }
     
-    // 현재 상태 업데이트
+    // Update current state
     updateKeyboardInput();
     updateGamepadInput();
     
-    // 상태 변화 감지
+    // Detect state changes
     for (auto& [button, state] : m_buttonStates) {
         state.justPressed = state.current && !state.previous;
         state.justReleased = !state.current && state.previous;
@@ -158,7 +158,7 @@ void Input::handleKeyboardInput(const SDL_Event& event) {
         SDL_Scancode scancode = event.key.keysym.scancode;
         bool pressed = (event.type == SDL_KEYDOWN);
         
-        // 매핑된 버튼 찾기
+        // Find mapped button
         for (const auto& [button, key] : m_keyMappings) {
             if (key == scancode) {
                 updateButtonState(button, pressed);
@@ -176,7 +176,7 @@ void Input::handleGamepadInput(const SDL_Event& event) {
         SDL_ControllerButtonEvent buttonEvent = event.cbutton;
         bool pressed = (event.type == SDL_CONTROLLERBUTTONDOWN);
         
-        // 매핑된 버튼 찾기
+        // Find mapped button
         for (const auto& [button, gamepadButton] : m_gamepadMappings) {
             if (gamepadButton == buttonEvent.button) {
                 updateButtonState(button, pressed);
@@ -191,7 +191,7 @@ bool Input::initializeGamepad() {
         m_gameController = SDL_GameControllerOpen(0);
         if (m_gameController) {
             m_gamepadConnected = true;
-            std::cout << "게임패드 연결됨: " << SDL_GameControllerName(m_gameController) << std::endl;
+            std::cout << "Gamepad connected: " << SDL_GameControllerName(m_gameController) << std::endl;
             return true;
         }
     }
