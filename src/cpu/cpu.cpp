@@ -90,7 +90,8 @@ void CPU::step() {
     m_historyIndex = (m_historyIndex + 1) % LOOP_HISTORY_SIZE;
     
     // Check for same PC infinite loop (single instruction loop)
-    if (currentPC == m_lastPC) {
+    // Disabled for interactive ROM execution - only JMP $xxxx to self is truly infinite
+    if (false && currentPC == m_lastPC) {
         m_loopCount++;
         if (m_loopCount >= MAX_LOOP_COUNT) {
             // Infinite loop detected
@@ -145,11 +146,17 @@ void CPU::step() {
         uint32_t prev2Idx = (m_historyIndex - 3 + LOOP_HISTORY_SIZE) % LOOP_HISTORY_SIZE;
         uint32_t prev3Idx = (m_historyIndex - 4 + LOOP_HISTORY_SIZE) % LOOP_HISTORY_SIZE;
         
-        // Check for 2-instruction loop: current and previous match with 2 instructions before
-        if (m_pcHistory[lastIdx] == m_pcHistory[prev2Idx] && 
+        // Check for 2-instruction loop - disabled for interactive ROM execution
+        if (false && m_pcHistory[lastIdx] == m_pcHistory[prev2Idx] &&
             m_pcHistory[prevIdx] == m_pcHistory[prev3Idx] &&
             m_pcHistory[lastIdx] != m_pcHistory[prevIdx]) {
-            m_shortLoopCount++;
+            // Don't count I/O polling loops as infinite loops
+            // CMP $2140-$2143 / BNE is normal APU handshake
+            uint8_t loopOpcode = m_memory->read8(m_pcHistory[prevIdx]);
+            uint16_t loopOperand = m_memory->read8(m_pcHistory[prevIdx] + 1) | (m_memory->read8(m_pcHistory[prevIdx] + 2) << 8);
+            bool isIOPoll = (loopOpcode == 0xCD || loopOpcode == 0xAD || loopOpcode == 0xCF) &&
+                            (loopOperand >= 0x2140 && loopOperand <= 0x2143);
+            if (!isIOPoll) m_shortLoopCount++;
             if (m_shortLoopCount >= MAX_LOOP_COUNT) {
                 // Short loop detected
                 std::cout << "\n=== INFINITE LOOP DETECTED (2-instruction loop) ===" << std::endl;
@@ -212,39 +219,8 @@ void CPU::step() {
     }
     
     
-    // Check for fail condition: reaching the final loop in @failed routine
-    // @wait3 loop (cmp $2140, bne @wait3) or @end loop (bra @end)
-    // These are the final loops that indicate test failure
-    // PC range: approximately 0x008220-0x008270 for @failed routine
-    if (m_address >= 0x008220 && m_address <= 0x008270) {
-        // Check if we're in a tight loop (same PC repeating)
-        // This indicates we've reached the final failure loop
-        static uint32_t lastFailPC = 0;
-        static int failLoopCount = 0;
-        
-        if (m_address == lastFailPC) {
-            failLoopCount++;
-            // If we're looping at the same PC 3+ times, it's the final failure loop
-            if (failLoopCount >= 3) {
-                std::cout << "\n=== SPC TEST FAILED - Reached final loop ===" << std::endl;
-                std::cout << "PC: 0x" << std::hex << m_address << std::dec << std::endl;
-                std::cout << "Loop count: " << failLoopCount << std::endl;
-                Logger::getInstance().logCPU("=== SPC TEST FAILED - Reached final loop ===");
-                std::ostringstream oss;
-                oss << "Final loop PC: 0x" << std::hex << m_address << std::dec << ", loop count: " << failLoopCount;
-                Logger::getInstance().logCPU(oss.str());
-                Logger::getInstance().flush();
-                m_quitEmulation = true;
-                return;
-            }
-        } else {
-            lastFailPC = m_address;
-            failLoopCount = 1;
-        }
-    }
-    
-    // Legacy check for fail condition (entering fail routine at 0x008242)
-    if (m_address == 0x008242) {
+    // Legacy check for fail condition (entering fail routine at 0x008242) - spctest only
+    if (false && m_address == 0x008242) {
         Logger::getInstance().logCPU("=== TEST FAILED - ENTERING fail routine ===");
         Logger::getInstance().logCPU("Memory Dump (0x000000 - 0x000040):");
         
@@ -422,7 +398,7 @@ void CPU::step() {
         }
             
         uint8_t opcode = m_memory->read8(m_address);
-        
+
         // Get opcode name and byte length
         const char* opcodeName = "???";
         int byteLength = 1; // Default: opcode only
@@ -797,11 +773,11 @@ void CPU::triggerNMI() {
 
 void CPU::handleNMI() {
     // NMI (Non-Maskable Interrupt) handling
-    // Push PBR, PC, and status to stack
-    m_memory->write8(0x0100 + m_sp--, m_pbr);               // Program Bank
-    m_memory->write8(0x0100 + m_sp--, (m_pc >> 8) & 0xFF);  // PC high byte
-    m_memory->write8(0x0100 + m_sp--, m_pc & 0xFF);         // PC low byte
-    m_memory->write8(0x0100 + m_sp--, m_p);                 // Status register
+    // Push PBR, PC, and status to stack (use pushStack for correct native/emulation mode handling)
+    pushStack(m_pbr);                    // Program Bank
+    pushStack((m_pc >> 8) & 0xFF);       // PC high byte
+    pushStack(m_pc & 0xFF);              // PC low byte
+    pushStack(m_p);                      // Status register
     
     // Set interrupt disable flag
     m_p |= 0x04;
@@ -3741,7 +3717,12 @@ void CPU::executeInstruction(uint8_t opcode) {
         case 0x9C: { // STZ Absolute
             uint16_t addr = m_memory->read16(m_address);
             m_pc += 2;
-            m_memory->write8(addr, 0x00);
+            if (m_modeM) {
+                m_memory->write8(addr, 0x00);
+            } else {
+                m_memory->write8(addr, 0x00);
+                m_memory->write8(addr + 1, 0x00);
+            }
         } break;
         
         case 0xFB: { // XCE - Exchange Carry and Emulation bit

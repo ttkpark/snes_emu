@@ -274,9 +274,11 @@ void Memory::write8(uint32_t address, uint8_t value) {
                 warnedAutoJoypad = true;
             }
         } else if (offset == 0x420B) { // MDMAEN - DMA Enable
-            Logger::getInstance().logCPU("=== DMA ENABLE! value=" + std::to_string(value) + " ===");
-            Logger::getInstance().flush();
-            // std::cout << "PPU: DMA Enable=$" << std::hex << (int)value << std::dec << std::endl;
+            static int dmaLogCount = 0;
+            if (dmaLogCount < 20) {
+                std::cout << "DMA Enable=$" << std::hex << (int)value << std::dec << std::endl;
+                dmaLogCount++;
+            }
             // Trigger DMA channels based on bit flags
             for (int i = 0; i < 8; i++) {
                 if (value & (1 << i)) {
@@ -290,7 +292,7 @@ void Memory::write8(uint32_t address, uint8_t value) {
                 std::cout << "[WARN] HDMAEN($420C) not yet implemented - only value is preserved." << std::endl;
                 warnedHDMA = true;
             }
-            m_ioRegisters[offset] = value;
+            m_ioRegisters[offset - 0x4200] = value;
         } else {
             // Forward to PPU (for NMI control)
             if (m_ppu) {
@@ -309,9 +311,9 @@ void Memory::write8(uint32_t address, uint8_t value) {
             dmaRegWriteCount++;
         }
         
-        // Handle DMA register writes
-        uint8_t channel = (offset - 0x4300) / 8;
-        uint8_t reg = (offset - 0x4300) % 8;
+        // Handle DMA register writes (each channel uses 16 bytes: $43x0-$43xF)
+        uint8_t channel = (offset - 0x4300) / 16;
+        uint8_t reg = (offset - 0x4300) % 16;
         
         if (channel < 8) {
             switch (reg) {
@@ -385,105 +387,39 @@ void Memory::performDMA(uint8_t channel) {
     uint16_t destAddr = 0x2100 + dma.destAddr;
     bool isAPUPort = (destAddr >= 0x2140 && destAddr < 0x2144);
     
-    std::ostringstream oss;
-    oss << "DMA Channel " << (int)channel << ": " 
-        << (toPPU ? "CPU->" : "") 
-        << (isAPUPort ? "APU" : "PPU")
-        << (toPPU ? "" : "->CPU")
-        << " Mode=" << (int)mode 
-        << " Size=" << dma.size 
-        << " Source=0x" << std::hex << sourceAddr 
-        << " Dest=0x" << destAddr << std::dec;
-    Logger::getInstance().logCPU(oss.str());
-    Logger::getInstance().flush();
+    static int dmaExecLog = 0;
+    if (dmaExecLog < 20) {
+        std::cout << "  DMA Ch" << (int)channel << ": "
+            << (toPPU ? "CPU->" : "") << (isAPUPort ? "APU" : "PPU")
+            << " Mode=" << (int)mode << " Size=" << dma.size
+            << " Src=0x" << std::hex << sourceAddr
+            << " Dst=0x" << destAddr << std::dec << std::endl;
+        dmaExecLog++;
+    }
     
+    // SNES DMA: size=0 means 65536 bytes
+    uint32_t transferSize = (dma.size == 0) ? 65536 : dma.size;
+
     // Perform transfer based on mode
-    switch (mode) {
-        case 0: // 1 register, write once
-            if (toPPU && dma.size > 0) {
-                if (isAPUPort && m_apu) {
-                    // DMA to APU port
-                    for (uint16_t i = 0; i < dma.size; i++) {
-                        uint8_t data = read8(sourceAddr + i);
-                        uint8_t port = destAddr - 0x2140;
-                        if (port < 4) {
-                            m_apu->writePort(port, data);
-                        }
-                    }
-                } else if (m_ppu) {
-                    // DMA to PPU register
-                    uint8_t data = read8(sourceAddr);
-                    m_ppu->writeRegister(destAddr, data);
-                }
+    if (toPPU) {
+        for (uint32_t i = 0; i < transferSize; i++) {
+            uint8_t data = read8(sourceAddr + i);
+            uint16_t targetReg;
+            switch (mode) {
+                case 0: targetReg = destAddr; break;
+                case 1: targetReg = destAddr + (i & 1); break;
+                case 2: targetReg = destAddr; break;
+                case 3: targetReg = destAddr + ((i >> 1) & 1); break;
+                case 4: targetReg = destAddr + (i & 3); break;
+                default: targetReg = destAddr; break;
             }
-            break;
-            
-        case 1: // 2 registers, write twice (alternates between destAddr and destAddr+1)
-            if (toPPU && dma.size > 0) {
-                if (isAPUPort && m_apu) {
-                    // DMA to APU ports (alternates between two ports)
-                    for (uint16_t i = 0; i < dma.size; i++) {
-                        uint8_t data = read8(sourceAddr + i);
-                        uint8_t port = (destAddr - 0x2140) + (i & 1);
-                        if (port < 4) {
-                            m_apu->writePort(port, data);
-                        }
-                    }
-                } else if (m_ppu) {
-                    // DMA to PPU registers
-                    std::ostringstream dmaDebug;
-                    dmaDebug << "DMA Mode 1: First 16 bytes: ";
-                    for (uint16_t i = 0; i < dma.size; i++) {
-                        uint8_t data = read8(sourceAddr + i);
-                        if (i < 16) {
-                            dmaDebug << std::hex << std::setw(2) << std::setfill('0') << (int)data << " ";
-                        }
-                        // Alternate between two registers
-                        uint16_t targetReg = destAddr + (i & 1);
-                        m_ppu->writeRegister(targetReg, data);
-                    }
-                    dmaDebug << std::dec;
-                    Logger::getInstance().logCPU(dmaDebug.str());
-                    
-                    // Log bytes at offset 0x600 (where char '0' should be)
-                    if (dma.size > 0x600) {
-                        std::ostringstream dmaDebug2;
-                        dmaDebug2 << "DMA Mode 1: Bytes at offset 0x600 (char '0'): ";
-                        for (uint16_t i = 0x600; i < 0x600 + 16 && i < dma.size; i++) {
-                            uint8_t data = read8(sourceAddr + i);
-                            dmaDebug2 << std::hex << std::setw(2) << std::setfill('0') << (int)data << " ";
-                        }
-                        dmaDebug2 << std::dec;
-                        Logger::getInstance().logCPU(dmaDebug2.str());
-                    }
-                    
-                    Logger::getInstance().flush();
-                }
+            if (isAPUPort && m_apu) {
+                uint8_t port = targetReg - 0x2140;
+                if (port < 4) m_apu->writePort(port, data);
+            } else if (m_ppu) {
+                m_ppu->writeRegister(targetReg, data);
             }
-            break;
-            
-        case 2: // 1 register, write twice
-        case 3: // 4 registers, write once
-            // Simplified implementation
-            if (toPPU && dma.size > 0) {
-                if (isAPUPort && m_apu) {
-                    // DMA to APU port
-                    for (uint16_t i = 0; i < dma.size; i++) {
-                        uint8_t data = read8(sourceAddr + i);
-                        uint8_t port = destAddr - 0x2140;
-                        if (port < 4) {
-                            m_apu->writePort(port, data);
-                        }
-                    }
-                } else if (m_ppu) {
-                    // DMA to PPU register
-                    for (uint16_t i = 0; i < dma.size; i++) {
-                        uint8_t data = read8(sourceAddr + i);
-                        m_ppu->writeRegister(destAddr, data);
-                    }
-                }
-            }
-            break;
+        }
     }
     
     // Disable DMA after transfer
@@ -616,6 +552,14 @@ uint32_t Memory::getROMAddress(uint32_t address, ROMMapping mapping) {
             // Banks $80-$BF mirror banks $C0-$FF
             else if (bank >= 0x80 && bank <= 0xBF) {
                 return ((bank - 0x80) * 0x10000) + offset;
+            }
+            // Banks $00-$3F, offset $8000-$FFFF mirror ROM
+            else if (bank <= 0x3F && offset >= 0x8000) {
+                return (bank * 0x10000) + offset;
+            }
+            // Banks $40-$7D map full 64KB to ROM
+            else if (bank >= 0x40 && bank <= 0x7D) {
+                return (bank * 0x10000) + offset;
             }
             break;
             

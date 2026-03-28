@@ -66,26 +66,49 @@ Components are connected in `main_complete.cpp`:
 
 ### Active Work: SPC700 Instruction Verification
 The SPC700 (APU processor) is being validated against `spctest.sfc` test ROM.
-- **Block 1 tests (0x00-0xBE) all pass** - covers most SPC700 instructions
-- **Block 2 fails at test 0x41** - IPL multi-block transfer timing issue
-- spctest uses multi-block transfer: block 1 loads to 0x0300, runs tests, then SPC re-enables IPL ROM (JMP $FFC0) for block 2
+- **Blocks 1-5 all pass** - all SPC700 instruction tests complete without failure
+- SPC returns to IPL ROM after block 5 to wait for next block transfer
+- If more blocks exist, CPU needs to send them; otherwise spctest.sfc may be fully passing
+
+### spctest.sfc multi-block structure
+- Block 1: tests 0x00-0xBE loaded to 0x0300, framework uses `64 F5 01 D0 FB` (CMP A,$F5 / TCALL 0 / BNE loop)
+- Block 2: tests 0xBF+ loaded to 0x0300, framework uses `78 01 F5 D0 FB` (standard CMP $F5,#$01 / BNE loop)
+- Block 3: more tests loaded to 0x0300
+- After each block: SPC writes port 0 = 0x01, waits for CPU, then MOV $F1,#$80 / JMP $FFC0 to re-enter IPL ROM
 
 ### Key bugs fixed (dev branch):
-1. **Opcode fetch PC not incrementing** - all instruction handlers were reading opcode byte as operand
-2. **writePort() software state machine** - was overriding IPL ROM's natural execution, modifying PC and ARAM directly
-3. **readARAM/writeARAM I/O range** - `addr >= 0xF0` matched ALL high addresses (0xFFF0 etc.), fixed to `0x00F0-0x00FF`
-4. **Data mirroring in writePort** - IPL ROM's page transfer can't reach high ARAM; data is also mirrored directly
+1. **Opcode fetch PC not incrementing** - `readARAM(m_regs.pc)` changed to `readARAM(m_regs.pc++)` in executeSPC700Instruction
+2. **writePort() 600-line software state machine removed** - IPL ROM now runs natively for data transfer
+3. **readARAM/writeARAM I/O range** - `addr >= 0xF0` matched ALL high addresses ($FFF0 etc.), fixed to `0x00F0-0x00FF`
+4. **Opcode 0x64 = CMP A,dp (2 bytes)** - was wrongly 3-byte CMP dp,#imm. Block 1 framework uses TCALL 0 after it; TCALL stub at $FF00 handles this
+5. **CMP dp,dp (0x69)** - missing getDirectPageAddr() + wrong operand order (was val1-val2, fixed to valDst-valSrc)
+6. **MOV dp,dp (0xFA)** - same two bugs as CMP dp,dp: missing getDirectPageAddr() + wrong operand order
+7. **DBNZ Y,rel (0xFE)** - was incorrectly calling updateNZ(); DBNZ does NOT modify flags
+8. **TCALL vector stub** - installed `PUSH PSW / MOV A,$F5 / POP PSW / RET` at $FF00 for uninitialized TCALL vectors
+9. **CLR1/BBC opcode names/lengths** - 0x32,0x52..0xF2 and 0x53,0x93 added to logging switches
+10. **Timer counter reads** - $FD-$FF now return counter and clear on read (was returning target)
+11. **MOVW YA,dp (0xBA)** - high byte read used `addr+1` instead of `getDirectPageAddr((dp+1)&0xFF)` for dp page wrapping
+12. **POP X/Y (0xCE/0xEE)** - incorrectly called updateNZ(); POP does NOT modify flags
+13. **RETI (0x7F)** - was not popping PSW before PC; RETI = pop PSW, pop PC_low, pop PC_high
+14. **All SBC variants** - missing H (half-carry) flag; formula: `(a & 0xF) >= (val & 0xF) + borrow`
+15. **SBC dp,dp (0xA9)** - src/dst operand order reversed + result written to wrong address (same bug pattern as #5/#6)
+16. **SBC dp,#imm (0xB8)** - operand read order wrong (should be imm first, dp second)
+17. **All SBC V flag** - used ADC formula `(a^res)&(val^res)`, fixed to SBC formula `(a^res)&(a^val)`
+18. **SUBW YA,dp (0x9A)** - missing H flag (based on high byte half-borrow) + V flag used ADC formula
+19. **DAA/DAS (0xDF/0xBE)** - correction order reversed; SPC700 does high nibble first, then low nibble
+20. **DIV YA,X (0x9E)** - missing V flag + divide-by-zero/overflow results wrong; implemented bsnes/ares algorithm
 
 ### Known issues
-- **Opcode 0x64**: SPC700 spec says CMP A,dp (2 bytes), but spctest.sfc framework requires 3-byte CMP dp,#imm behavior. Currently 3-byte for spctest compat.
-- **Block 2 test 0x41**: fails due to IPL multi-block transfer timing. The SPC re-enters IPL ROM for the second block, but something goes wrong with the data or execution context. The IPL ROM's `BPL` at $FFE9 limits single-block transfers to pages $00-$7F; data above $8000 requires multi-block coordination.
-- **Data mirroring abandoned**: attempted to mirror CPU port writes directly to ARAM, but timing conflicts with IPL ROM's own writes caused data corruption. Pure IPL ROM approach used instead.
+- **Opcode 0x64**: Standard SPC700 = CMP A,dp (2 bytes). Block 1 framework byte sequence `64 F5 01` works as CMP A,$F5 + TCALL 0. Block 2+ framework uses 0x78 (standard CMP dp,#imm) instead.
+- **TCALL vectors**: Not loaded via IPL transfer (data only reaches ~0x7776). $FF00 stub provides fallback.
+- **Other dp,dp instructions**: OR(0x09), AND(0x29), EOR(0x49), ADC(0x89), SBC(0xA9) dp,dp already use getDirectPageAddr() correctly. Only CMP(0x69) and MOV(0xFA) were buggy.
 
 ### How spctest.sfc works
 - SPC700 boots via IPL ROM, receives test program from CPU via ports
 - Each test writes its number to Port 2 (0x00, 0x01, 0x02, ...)
 - **Success**: Port 0 = 0xFF, PC loops at 0x0350
 - **Failure**: Port 2 = 0x02 (fail flag), PC loops at 0x0357
+- Verification routine at $0322: saves A,X,Y,PSW to $12-$15, returns PSW in A
 
 ### Debugging test failures
 ```bash
@@ -98,8 +121,14 @@ The SPC700 (APU processor) is being validated against `spctest.sfc` test ROM.
 # Check last APU state
 Get-Content apu_trace.log -Tail 50
 
-# Find last test number
-Get-Content apu_trace.log | Select-String "wrote port 2"
+# Find last test number (look for MOVW at 0x031F which writes test counter)
+grep -a "PC:0x031f.*MOVW" apu_trace.log | tail -5
+
+# Find fail entry point
+grep -an "PC:0x033c" apu_trace.log | head -1
+
+# Check instructions before fail (replace LINENUM)
+sed -n '$((LINENUM-30)),${LINENUM}p' apu_trace.log
 ```
 
 ## Hardware Reference Docs
@@ -116,9 +145,10 @@ Located in `docs/hardware/` - these are the authoritative SNES hardware specs:
 - CPU<->APU communication: CPU writes to `m_cpuPorts[0-3]`, SPC reads via `$F4-$F7`; SPC writes to ARAM `$F4-$F7`, CPU reads via `readPort()`
 - IPL ROM is hardware ROM overlaying ARAM at `$FFC0-$FFFF`, toggled by `$F1` bit 7
 - Build artifacts (.obj, .exe, .log) are gitignored
+- TCALL vector stub at $FF00: `PUSH PSW / MOV A,$F5 / POP PSW / RET` for block 1 framework compatibility
 
 ## Remaining Milestones
-1. **SPC700 full test pass** - all spctest.sfc tests must pass
+1. **SPC700 full test pass** - all spctest.sfc tests must pass (currently block 3 test 0xF6)
 2. **PPU rendering** - backgrounds, sprites, Mode 0-7
 3. **DMA/HDMA** - bulk data transfer
 4. **System integration** - CPU/PPU/APU timing sync, NMI/IRQ

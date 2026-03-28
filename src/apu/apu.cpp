@@ -863,9 +863,8 @@ static int getSPC700OperandLength(uint8_t opcode) {
         case 0xE4: case 0xF8: case 0xEB: // MOV A/X/Y,dp
         case 0x88: case 0xA8: case 0x28: case 0x08: case 0x48: // ADC/SBC/AND/OR/EOR A,#imm
         case 0x84: case 0xA4: case 0x24: case 0x04: case 0x44: // ADC/SBC/AND/OR/EOR A,dp
-        case 0x68: case 0x3E: case 0xC8: case 0xAD: // CMP (0x64 is in 2-byte group)
+        case 0x68: case 0x64: case 0x3E: case 0xC8: case 0xAD: // CMP
         case 0x2F: case 0xF0: case 0xD0: case 0x90: case 0xB0: case 0x30: case 0x10: case 0x50: case 0x70: // Branch instructions
-        case 0xFA: // MOV dp1,dp2
         case 0x3A: case 0x5A: case 0x7A: case 0x9A: case 0xBA: case 0xDA: // Word operations
         case 0x12: case 0x32: case 0x52: case 0x72: case 0x92: case 0xB2: case 0xD2: case 0xF2: // CLR1 dp.bit
         case 0x03: case 0x13: case 0x23: case 0x33: case 0x43: case 0x53: case 0x63: case 0x73: case 0x83: case 0x93: case 0xA3: case 0xC3: case 0xD3: case 0xE3: case 0xF3: // BBS/BBC dp.bit,rel
@@ -874,18 +873,20 @@ static int getSPC700OperandLength(uint8_t opcode) {
         case 0x05: case 0x06: case 0x07: case 0x09: case 0x0B: case 0x14: case 0x17: case 0x18: case 0x19: case 0x1A: case 0x1B: // Various operations (0x15, 0x16 are !abs+X/Y, moved to 2-byte)
         case 0x25: case 0x26: case 0x27: case 0x29: case 0x2B: case 0x37: case 0x38: case 0x39: case 0x3B: // Various operations (0x2C is ROL abs - 2 bytes, 0x35, 0x36 are !abs+X/Y - 2 bytes, moved to 2-byte)
         case 0x45: case 0x47: case 0x49: case 0x4B: case 0x54: case 0x57: case 0x58: case 0x59: case 0x5B: // Various operations (0x4C is LSR abs - 2 bytes, 0x55, 0x56 are !abs+X/Y - 2 bytes, moved to 2-byte)
-        case 0x65: case 0x67: case 0x69: case 0x6B: case 0x74: case 0x77: case 0x79: case 0x7B: // Various operations (0x6C, 0x66, 0x75, 0x76 are abs or !abs+X/Y, moved to 2-byte)
+        case 0x65: case 0x67: case 0x6B: case 0x74: case 0x77: case 0x79: case 0x7B: // Various operations (0x69=CMP dp,dp moved to 2-byte)
         case 0x7E: // CMP Y,dp - 1 byte operand
         case 0x85: case 0x86: case 0x87: case 0x89: case 0x8B: case 0x8C: case 0x94: case 0x97: case 0x99: case 0x9B: // Various operations (0x95, 0x96 are !abs+X/Y, moved to 2-byte)
         case 0xA5: case 0xA6: case 0xA7: case 0xA9: case 0xAB: case 0xAC: case 0xB4: case 0xB7: case 0xB9: case 0xBB: // Various operations (0xB5, 0xB6 are !abs+X/Y, moved to 2-byte)
         case 0xC5: case 0xC6: case 0xC7: case 0xC9: case 0xCC: case 0xD4: case 0xD7: case 0xD9: case 0xDB: // Various operations (0xD5, 0xD6 are !abs+X/Y, moved to 2-byte)
         case 0xE5: case 0xE6: case 0xE7: case 0xE9: case 0xEC: case 0xF4: case 0xF7: case 0xF9: case 0xFB: // Various operations (0xF5, 0xF6 are !abs+X/Y, moved to 2-byte)
         case 0x0A: case 0x2A: case 0x4A: case 0x6A: case 0x8A: case 0xAA: case 0xCA: case 0xEA: // Bit operations
+        case 0xFE: // DBNZ Y,rel
             return 1;
         
         // 2 byte operand (immediate+dp, abs, !abs+X/Y)
         case 0x8F: // MOV dp,#imm
-        case 0x64: // CMP dp,#imm (spctest 3-byte variant)
+        case 0x69: // CMP dp,dp (2 operand bytes)
+        case 0xFA: // MOV dp,dp (2 operand bytes)
         case 0x3F: case 0x5F: // CALL/JMP abs
         case 0x0C: case 0x0E: case 0x1E: case 0x1F: case 0x2C: case 0x4C: case 0x4E: case 0x5E: case 0x6C: // Various abs operations (0x7E is CMP Y,dp - 1 byte, removed)
         // !abs+X/Y addressing mode - 2 bytes for absolute address
@@ -909,16 +910,16 @@ void APU::executeSPC700Instruction() {
     uint16_t savedPC = m_regs.pc;
     uint8_t opcode = readARAM(m_regs.pc++);  // Fetch opcode and advance PC past it
 
-    // Detect test0000 start BEFORE logging: PC=0x0359, MOV A,#$00 is the first instruction of test0000
-    // Check if this is MOV A,#imm (0xE8) at PC 0x0359
-    if (savedPC == 0x0359 && opcode == 0xE8) {
-        // Read the immediate value to confirm it's 0x00
-        uint8_t imm = readARAM(m_regs.pc);  // PC now points to operand
-        if (imm == 0x00) {
-            std::cout << "\n=== TEST0000 STARTING - Clearing logs ===" << std::endl;
-            std::cout << "SPC700 PC:0x0359, MOV A,#$00" << std::endl;
-            Logger::getInstance().clearLogs();
-        }
+    // Debug: dump ARAM on each entry to 0x0300 (block starts)
+    if (savedPC == 0x0300) {
+        static int entryCount = 0;
+        entryCount++;
+        fprintf(stderr, "\n=== BLOCK %d: PC=0x0300, opcode=0x%02X ===\n", entryCount, opcode);
+        fprintf(stderr, "ARAM[0x0300-0x030F]: ");
+        for (int i = 0; i < 16; i++) fprintf(stderr, "%02X ", m_aram[0x0300 + i]);
+        fprintf(stderr, "\nARAM[0x1300-0x131F]: ");
+        for (int i = 0; i < 32; i++) fprintf(stderr, "%02X ", m_aram[0x1300 + i]);
+        fprintf(stderr, "\nIPL=%d, $00=%02X $01=%02X\n", m_iplromEnable?1:0, m_aram[0], m_aram[1]);
     }
 
     uint8_t savedA = m_regs.a;
@@ -991,7 +992,7 @@ void APU::executeSPC700Instruction() {
         case 0x34: opcodeName = "AND A,dp+X"; break;
         case 0x59: opcodeName = "EOR X,dp"; break;
         case 0x68: opcodeName = "CMP A,#imm"; break;
-        case 0x64: opcodeName = "CMP dp,#imm"; break;
+        case 0x64: opcodeName = "CMP A,dp"; break;
         case 0x3E: opcodeName = "CMP X,dp"; break;
         case 0x7E: opcodeName = "CMP Y,dp"; break;
         case 0xAD: opcodeName = "CMP Y,#imm"; break;
@@ -1119,6 +1120,7 @@ void APU::executeSPC700Instruction() {
         case 0x6B: opcodeName = "ROR dp"; break;
         case 0x6C: opcodeName = "ROR abs"; break;
         case 0x6E: opcodeName = "DBNZ dp,rel"; break;
+        case 0xFE: opcodeName = "DBNZ Y,rel"; break;
         case 0x73: opcodeName = "BBC dp.bit,rel"; break;
         case 0x74: opcodeName = "CMP A,dp+X"; break;
         case 0x75: opcodeName = "CMP A,!abs+X"; break;
@@ -1367,10 +1369,11 @@ void APU::executeSPC700Instruction() {
         } break;
         
         // MOV instructions - Direct Page to Direct Page
-        case 0xFA: { // MOV dp1, dp2
-            uint8_t dp1 = readARAM(m_regs.pc++);
-            uint8_t dp2 = readARAM(m_regs.pc++);
-            writeARAM(dp1, readARAM(dp2));
+        case 0xFA: { // MOV dp(dst),dp(src): [dst] = [src]
+            uint8_t src = readARAM(m_regs.pc++);
+            uint8_t dst = readARAM(m_regs.pc++);
+            uint8_t val = readARAM(getDirectPageAddr(src));
+            writeARAM(getDirectPageAddr(dst), val);
         } break;
         
         // Arithmetic operations
@@ -1429,9 +1432,11 @@ void APU::executeSPC700Instruction() {
         } break;
         case 0xA8: { // SBC A, #imm
             uint8_t imm = readARAM(m_regs.pc++);
-            uint16_t diff = m_regs.a - imm - (getFlag(FLAG_C) ? 0 : 1);
+            uint8_t borrow = getFlag(FLAG_C) ? 0 : 1;
+            uint16_t diff = m_regs.a - imm - borrow;
             setFlag(FLAG_C, diff <= 0xFF);
-            setFlag(FLAG_V, ((m_regs.a ^ diff) & (imm ^ diff) & 0x80) != 0);
+            setFlag(FLAG_H, (m_regs.a & 0x0F) >= (imm & 0x0F) + borrow);
+            setFlag(FLAG_V, ((m_regs.a ^ diff) & (m_regs.a ^ imm) & 0x80) != 0);
             m_regs.a = diff & 0xFF;
             updateNZ(m_regs.a);
         } break;
@@ -1439,13 +1444,15 @@ void APU::executeSPC700Instruction() {
             uint8_t dp = readARAM(m_regs.pc++);
             uint16_t addr = getDirectPageAddr(dp);
             uint8_t val = readARAM(addr);
-            uint16_t diff = m_regs.a - val - (getFlag(FLAG_C) ? 0 : 1);
+            uint8_t borrow = getFlag(FLAG_C) ? 0 : 1;
+            uint16_t diff = m_regs.a - val - borrow;
             setFlag(FLAG_C, diff <= 0xFF);
-            setFlag(FLAG_V, ((m_regs.a ^ diff) & (val ^ diff) & 0x80) != 0);
+            setFlag(FLAG_H, (m_regs.a & 0x0F) >= (val & 0x0F) + borrow);
+            setFlag(FLAG_V, ((m_regs.a ^ diff) & (m_regs.a ^ val) & 0x80) != 0);
             m_regs.a = diff & 0xFF;
             updateNZ(m_regs.a);
         } break;
-        
+
         case 0x28: { // AND A, #imm
             m_regs.a &= readARAM(m_regs.pc++);
             updateNZ(m_regs.a);
@@ -1552,16 +1559,12 @@ void APU::executeSPC700Instruction() {
                 std::cout << oss.str() << std::endl; // Also print to console
             }
         } break;
-        case 0x64: { // CMP dp, #imm (3-byte variant used by spctest framework)
-            // NOTE: Standard SPC700 spec says 0x64 = CMP A,dp (2-byte).
-            // However, the spctest.sfc ROM framework code requires 3-byte behavior.
-            // This will need a proper solution when running commercial games.
+        case 0x64: { // CMP A, dp (standard SPC700: 2-byte)
             uint8_t dp = readARAM(m_regs.pc++);
-            uint8_t imm = readARAM(m_regs.pc++);
             uint16_t addr = getDirectPageAddr(dp);
             uint8_t val = readARAM(addr);
-            uint8_t result = val - imm;
-            setFlag(FLAG_C, val >= imm);
+            uint8_t result = m_regs.a - val;
+            setFlag(FLAG_C, m_regs.a >= val);
             updateNZ(result);
         } break;
         case 0x3E: { // CMP X, dp
@@ -1742,13 +1745,11 @@ void APU::executeSPC700Instruction() {
             // Note: POP A does NOT update flags (unlike POP X/Y)
             // This is important for save_results which pops PSW into A
         } break;
-        case 0xCE: { // POP X
+        case 0xCE: { // POP X - does NOT update flags
             m_regs.x = pop();
-            updateNZ(m_regs.x);
         } break;
-        case 0xEE: { // POP Y
+        case 0xEE: { // POP Y - does NOT update flags
             m_regs.y = pop();
-            updateNZ(m_regs.y);
         } break;
         case 0x8E: { // POP PSW
             m_regs.psw = pop();
@@ -1767,11 +1768,11 @@ void APU::executeSPC700Instruction() {
             uint8_t high = pop();
             m_regs.pc = low | (high << 8);
         } break;
-        case 0x7F: { // RETI
+        case 0x7F: { // RETI - pop PSW first, then pop PC
+            m_regs.psw = pop();
             uint8_t low = pop();
             uint8_t high = pop();
             m_regs.pc = low | (high << 8);
-            m_regs.psw |= FLAG_I; // Enable interrupts
         } break;
         case 0x5F: { // JMP abs
             uint16_t addr = readARAM(m_regs.pc++);
@@ -2488,23 +2489,27 @@ void APU::executeSPC700Instruction() {
             uint16_t addr = readARAM(m_regs.pc++);
             addr |= readARAM(m_regs.pc++) << 8;
             uint8_t val = readARAM(addr);
-            uint16_t diff = m_regs.a - val - (getFlag(FLAG_C) ? 0 : 1);
+            uint8_t borrow = getFlag(FLAG_C) ? 0 : 1;
+            uint16_t diff = m_regs.a - val - borrow;
             setFlag(FLAG_C, diff <= 0xFF);
-            setFlag(FLAG_V, ((m_regs.a ^ diff) & (val ^ diff) & 0x80) != 0);
+            setFlag(FLAG_H, (m_regs.a & 0x0F) >= (val & 0x0F) + borrow);
+            setFlag(FLAG_V, ((m_regs.a ^ diff) & (m_regs.a ^ val) & 0x80) != 0);
             m_regs.a = diff & 0xFF;
             updateNZ(m_regs.a);
         } break;
-        
+
         // SBC A,(X) - 0xA6
         case 0xA6: {
             uint8_t val = readARAM(m_regs.x);
-            uint16_t diff = m_regs.a - val - (getFlag(FLAG_C) ? 0 : 1);
+            uint8_t borrow = getFlag(FLAG_C) ? 0 : 1;
+            uint16_t diff = m_regs.a - val - borrow;
             setFlag(FLAG_C, diff <= 0xFF);
-            setFlag(FLAG_V, ((m_regs.a ^ diff) & (val ^ diff) & 0x80) != 0);
+            setFlag(FLAG_H, (m_regs.a & 0x0F) >= (val & 0x0F) + borrow);
+            setFlag(FLAG_V, ((m_regs.a ^ diff) & (m_regs.a ^ val) & 0x80) != 0);
             m_regs.a = diff & 0xFF;
             updateNZ(m_regs.a);
         } break;
-        
+
         // SBC A,(dp+X) - 0xA7
         case 0xA7: {
             uint8_t dp = readARAM(m_regs.pc++);
@@ -2514,51 +2519,59 @@ void APU::executeSPC700Instruction() {
             uint8_t ptrHigh = readARAM(ptrAddrHigh);
             uint16_t addr = ptrLow | (ptrHigh << 8);
             uint8_t val = readARAM(addr);
-            uint16_t diff = m_regs.a - val - (getFlag(FLAG_C) ? 0 : 1);
+            uint8_t borrow = getFlag(FLAG_C) ? 0 : 1;
+            uint16_t diff = m_regs.a - val - borrow;
             setFlag(FLAG_C, diff <= 0xFF);
-            setFlag(FLAG_V, ((m_regs.a ^ diff) & (val ^ diff) & 0x80) != 0);
+            setFlag(FLAG_H, (m_regs.a & 0x0F) >= (val & 0x0F) + borrow);
+            setFlag(FLAG_V, ((m_regs.a ^ diff) & (m_regs.a ^ val) & 0x80) != 0);
             m_regs.a = diff & 0xFF;
             updateNZ(m_regs.a);
         } break;
-        
+
         // SBC A,dp+X - 0xB4
         case 0xB4: {
             uint8_t dp = readARAM(m_regs.pc++);
             uint16_t addr = getDirectPageAddr((dp + m_regs.x) & 0xFF);
             uint8_t val = readARAM(addr);
-            uint16_t diff = m_regs.a - val - (getFlag(FLAG_C) ? 0 : 1);
+            uint8_t borrow = getFlag(FLAG_C) ? 0 : 1;
+            uint16_t diff = m_regs.a - val - borrow;
             setFlag(FLAG_C, diff <= 0xFF);
-            setFlag(FLAG_V, ((m_regs.a ^ diff) & (val ^ diff) & 0x80) != 0);
+            setFlag(FLAG_H, (m_regs.a & 0x0F) >= (val & 0x0F) + borrow);
+            setFlag(FLAG_V, ((m_regs.a ^ diff) & (m_regs.a ^ val) & 0x80) != 0);
             m_regs.a = diff & 0xFF;
             updateNZ(m_regs.a);
         } break;
-        
+
         // SBC A,!abs+X - 0xB5
         case 0xB5: {
             uint16_t addr = readARAM(m_regs.pc++);
             addr |= readARAM(m_regs.pc++) << 8;
             addr += m_regs.x;
             uint8_t val = readARAM(addr);
-            uint16_t diff = m_regs.a - val - (getFlag(FLAG_C) ? 0 : 1);
+            uint8_t borrow = getFlag(FLAG_C) ? 0 : 1;
+            uint16_t diff = m_regs.a - val - borrow;
             setFlag(FLAG_C, diff <= 0xFF);
-            setFlag(FLAG_V, ((m_regs.a ^ diff) & (val ^ diff) & 0x80) != 0);
+            setFlag(FLAG_H, (m_regs.a & 0x0F) >= (val & 0x0F) + borrow);
+            setFlag(FLAG_V, ((m_regs.a ^ diff) & (m_regs.a ^ val) & 0x80) != 0);
             m_regs.a = diff & 0xFF;
             updateNZ(m_regs.a);
         } break;
-        
+
         // SBC A,!abs+Y - 0xB6
         case 0xB6: {
             uint16_t addr = readARAM(m_regs.pc++);
             addr |= readARAM(m_regs.pc++) << 8;
             addr += m_regs.y;
             uint8_t val = readARAM(addr);
-            uint16_t diff = m_regs.a - val - (getFlag(FLAG_C) ? 0 : 1);
+            uint8_t borrow = getFlag(FLAG_C) ? 0 : 1;
+            uint16_t diff = m_regs.a - val - borrow;
             setFlag(FLAG_C, diff <= 0xFF);
-            setFlag(FLAG_V, ((m_regs.a ^ diff) & (val ^ diff) & 0x80) != 0);
+            setFlag(FLAG_H, (m_regs.a & 0x0F) >= (val & 0x0F) + borrow);
+            setFlag(FLAG_V, ((m_regs.a ^ diff) & (m_regs.a ^ val) & 0x80) != 0);
             m_regs.a = diff & 0xFF;
             updateNZ(m_regs.a);
         } break;
-        
+
         // SBC A,(dp)+Y - 0xB7
         case 0xB7: {
             uint8_t dp = readARAM(m_regs.pc++);
@@ -2566,39 +2579,46 @@ void APU::executeSPC700Instruction() {
             addr |= readARAM(getDirectPageAddr((dp + 1) & 0xFF)) << 8;
             addr += m_regs.y;
             uint8_t val = readARAM(addr);
-            uint16_t diff = m_regs.a - val - (getFlag(FLAG_C) ? 0 : 1);
+            uint8_t borrow = getFlag(FLAG_C) ? 0 : 1;
+            uint16_t diff = m_regs.a - val - borrow;
             setFlag(FLAG_C, diff <= 0xFF);
-            setFlag(FLAG_V, ((m_regs.a ^ diff) & (val ^ diff) & 0x80) != 0);
+            setFlag(FLAG_H, (m_regs.a & 0x0F) >= (val & 0x0F) + borrow);
+            setFlag(FLAG_V, ((m_regs.a ^ diff) & (m_regs.a ^ val) & 0x80) != 0);
             m_regs.a = diff & 0xFF;
             updateNZ(m_regs.a);
         } break;
-        
+
         // SBC (X),(Y) - 0xB9
         case 0xB9: { // SBC (X),(Y)
             uint8_t valX = readARAM(m_regs.x);
             uint8_t valY = readARAM(m_regs.y);
-            uint16_t diff = valX - valY - (getFlag(FLAG_C) ? 0 : 1);
+            uint8_t borrow = getFlag(FLAG_C) ? 0 : 1;
+            uint16_t diff = valX - valY - borrow;
             setFlag(FLAG_C, diff <= 0xFF);
-            setFlag(FLAG_V, ((valX ^ diff) & (valY ^ diff) & 0x80) != 0);
+            setFlag(FLAG_H, (valX & 0x0F) >= (valY & 0x0F) + borrow);
+            setFlag(FLAG_V, ((valX ^ diff) & (valX ^ valY) & 0x80) != 0);
             uint8_t result = diff & 0xFF;
             writeARAM(m_regs.x, result);
             updateNZ(result);
         } break;
 
         // SBC dp,#imm - 0xB8
+        // Binary encoding: B8 imm dp (immediate first, then dp)
         case 0xB8: {
-            uint8_t dp = readARAM(m_regs.pc++);
             uint8_t imm = readARAM(m_regs.pc++);
+            uint8_t dp = readARAM(m_regs.pc++);
             uint16_t addr = getDirectPageAddr(dp);
             uint8_t val = readARAM(addr);
-            uint16_t diff = val - imm - (getFlag(FLAG_C) ? 0 : 1);
+            uint8_t borrow = getFlag(FLAG_C) ? 0 : 1;
+            uint16_t diff = val - imm - borrow;
             setFlag(FLAG_C, diff <= 0xFF);
-            setFlag(FLAG_V, ((val ^ diff) & (imm ^ diff) & 0x80) != 0);
+            setFlag(FLAG_H, (val & 0x0F) >= (imm & 0x0F) + borrow);
+            setFlag(FLAG_V, ((val ^ diff) & (val ^ imm) & 0x80) != 0);
             uint8_t result = diff & 0xFF;
             writeARAM(addr, result);
             updateNZ(result);
         } break;
-        
+
         // Special instructions
         case 0x20: { // CLRP - Clear Direct Page flag
             setFlag(FLAG_P, false);
@@ -2626,27 +2646,27 @@ void APU::executeSPC700Instruction() {
             setFlag(FLAG_C, !getFlag(FLAG_C));
         } break;
         case 0xDF: { // DAA A - Decimal Adjust Accumulator
+            // SPC700: high nibble correction first, then low nibble
             uint8_t a = m_regs.a;
-            bool c = getFlag(FLAG_C);
-            if (getFlag(FLAG_H) || (a & 0x0F) > 9) {
-                a += 0x06;
-            }
-            if (c || (a & 0xF0) > 0x90) {
+            if (getFlag(FLAG_C) || a > 0x99) {
                 a += 0x60;
                 setFlag(FLAG_C, true);
+            }
+            if (getFlag(FLAG_H) || (a & 0x0F) > 0x09) {
+                a += 0x06;
             }
             m_regs.a = a;
             updateNZ(m_regs.a);
         } break;
         case 0xBE: { // DAS A - Decimal Adjust for Subtraction
+            // SPC700: high nibble correction first, then low nibble
             uint8_t a = m_regs.a;
-            bool c = getFlag(FLAG_C);
-            if (!getFlag(FLAG_H) && (a & 0x0F) > 9) {
-                a -= 0x06;
-            }
-            if (!c && (a & 0xF0) > 0x90) {
+            if (!getFlag(FLAG_C) || a > 0x99) {
                 a -= 0x60;
                 setFlag(FLAG_C, false);
+            }
+            if (!getFlag(FLAG_H) || (a & 0x0F) > 0x09) {
+                a -= 0x06;
             }
             m_regs.a = a;
             updateNZ(m_regs.a);
@@ -2655,19 +2675,20 @@ void APU::executeSPC700Instruction() {
             m_regs.a = ((m_regs.a << 4) | (m_regs.a >> 4));
             updateNZ(m_regs.a);
         } break;
-        case 0x9E: { // DIV YA,X - Divide YA by X
+        case 0x9E: { // DIV YA,X - Divide YA by X (bsnes/ares algorithm)
             uint16_t ya = m_regs.a | (m_regs.y << 8);
             uint8_t x = m_regs.x;
-            if (x == 0) {
-                // Division by zero - undefined behavior
-                m_regs.a = 0xFF;
-                m_regs.y = 0xFF;
+            setFlag(FLAG_H, (m_regs.y & 0x0F) >= (x & 0x0F));
+            setFlag(FLAG_V, m_regs.y >= x);
+            if (m_regs.y >= (unsigned)x * 2) {
+                // Overflow case (includes divide by zero when X=0)
+                m_regs.a = 255 - (ya - ((unsigned)x << 9)) / (256 - x);
+                m_regs.y = x + (ya - ((unsigned)x << 9)) % (256 - x);
             } else {
                 m_regs.a = ya / x;
                 m_regs.y = ya % x;
             }
             updateNZ(m_regs.a);
-            setFlag(FLAG_H, (m_regs.y & 0x0F) >= (x & 0x0F));
         } break;
         case 0xCF: { // MUL YA - Multiply Y by A
             uint16_t result = m_regs.y * m_regs.a;
@@ -2728,9 +2749,18 @@ void APU::executeSPC700Instruction() {
             uint16_t memVal = readARAM(addr);
             memVal |= readARAM(addrHigh) << 8;
             uint16_t ya = m_regs.a | (m_regs.y << 8);
+
+            // H flag: based on high byte subtraction (Y - highMem - borrowFromLow)
+            uint8_t lowA = m_regs.a;
+            uint8_t lowMem = memVal & 0xFF;
+            bool borrowFromLow = (lowA < lowMem);
+            uint8_t highA = m_regs.y;
+            uint8_t highMem = (memVal >> 8) & 0xFF;
+            setFlag(FLAG_H, (highA & 0xF) >= (highMem & 0xF) + (borrowFromLow ? 1 : 0));
+
             uint32_t diff = ya - memVal;
             setFlag(FLAG_C, diff <= 0xFFFF);
-            setFlag(FLAG_V, ((ya ^ diff) & (memVal ^ diff) & 0x8000) != 0);
+            setFlag(FLAG_V, ((ya ^ diff) & (ya ^ memVal) & 0x8000) != 0);
             m_regs.a = diff & 0xFF;
             m_regs.y = (diff >> 8) & 0xFF;
             // 16-bit Z/N flags
@@ -2740,8 +2770,9 @@ void APU::executeSPC700Instruction() {
         case 0xBA: { // MOVW YA,dp - 16-bit move
             uint8_t dp = readARAM(m_regs.pc++);
             uint16_t addr = getDirectPageAddr(dp);
+            uint16_t addrHigh = getDirectPageAddr((dp + 1) & 0xFF);
             m_regs.a = readARAM(addr);
-            m_regs.y = readARAM(addr + 1);
+            m_regs.y = readARAM(addrHigh);
             // 16-bit Z/N flags
             uint16_t ya = m_regs.a | (m_regs.y << 8);
             setFlag(FLAG_Z, ya == 0);
@@ -2996,9 +3027,8 @@ void APU::executeSPC700Instruction() {
                 m_regs.pc += offset;
             }
         } break;
-        case 0xFE: { // DBNZ Y,rel
+        case 0xFE: { // DBNZ Y,rel - decrement Y, branch if not zero. NO flag changes.
             m_regs.y--;
-            updateNZ(m_regs.y);
             int8_t offset = (int8_t)readARAM(m_regs.pc++);
             if (m_regs.y != 0) {
                 m_regs.pc += offset;
@@ -3164,13 +3194,13 @@ void APU::executeSPC700Instruction() {
             setFlag(FLAG_C, m_regs.y >= val);
             updateNZ(result);
         } break;
-        case 0x69: { // CMP dp,dp
-            uint8_t dp1 = readARAM(m_regs.pc++);
-            uint8_t dp2 = readARAM(m_regs.pc++);
-            uint8_t val1 = readARAM(dp1);
-            uint8_t val2 = readARAM(dp2);
-            uint8_t result = val1 - val2;
-            setFlag(FLAG_C, val1 >= val2);
+        case 0x69: { // CMP dp(dst),dp(src): [dst] - [src]
+            uint8_t src = readARAM(m_regs.pc++);  // first operand = source
+            uint8_t dst = readARAM(m_regs.pc++);  // second operand = destination
+            uint8_t valSrc = readARAM(getDirectPageAddr(src));
+            uint8_t valDst = readARAM(getDirectPageAddr(dst));
+            uint8_t result = valDst - valSrc;
+            setFlag(FLAG_C, valDst >= valSrc);
             updateNZ(result);
         } break;
         
@@ -3362,18 +3392,21 @@ void APU::executeSPC700Instruction() {
                 Logger::getInstance().logAPU(oss.str());
             }
         } break;
-        case 0xA9: { // SBC dp,dp
-            uint8_t dp1 = readARAM(m_regs.pc++);
-            uint8_t dp2 = readARAM(m_regs.pc++);
-            uint16_t addr1 = getDirectPageAddr(dp1);
-            uint16_t addr2 = getDirectPageAddr(dp2);
-            uint8_t val1 = readARAM(addr1);
-            uint8_t val2 = readARAM(addr2);
-            uint16_t diff = val1 - val2 - (getFlag(FLAG_C) ? 0 : 1);
+        case 0xA9: { // SBC dp,dp - dest = dest - src
+            // Binary encoding: A9 src dest (reversed!)
+            uint8_t dpSrc = readARAM(m_regs.pc++);
+            uint8_t dpDest = readARAM(m_regs.pc++);
+            uint16_t addrSrc = getDirectPageAddr(dpSrc);
+            uint16_t addrDest = getDirectPageAddr(dpDest);
+            uint8_t valSrc = readARAM(addrSrc);
+            uint8_t valDest = readARAM(addrDest);
+            uint8_t borrow = getFlag(FLAG_C) ? 0 : 1;
+            uint16_t diff = valDest - valSrc - borrow;
             setFlag(FLAG_C, diff <= 0xFF);
-            setFlag(FLAG_V, ((val1 ^ diff) & (val2 ^ diff) & 0x80) != 0);
+            setFlag(FLAG_H, (valDest & 0x0F) >= (valSrc & 0x0F) + borrow);
+            setFlag(FLAG_V, ((valDest ^ diff) & (valDest ^ valSrc) & 0x80) != 0);
             uint8_t result = diff & 0xFF;
-            writeARAM(addr1, result);
+            writeARAM(addrDest, result);
             updateNZ(result);
         } break;
         
@@ -3491,7 +3524,15 @@ void APU::loadBootROM() {
     // The IPL boot only clears $01-$EF, so $FF00 and $FFC0-$FFFF survive.
     // This handles the case where the SPC program uses TCALL but vectors
     // weren't loaded via the IPL data transfer.
-    m_aram[0xFF00] = 0x6F;  // RET opcode at $FF00
+    // Install a stub at $FF00 for uninitialized TCALL vectors.
+    // Block 1 framework: CMP A,$F5 / TCALL 0 / BNE loop
+    // TCALL must load A from port 1 while preserving flags from the CMP.
+    // Stub: PUSH PSW / MOV A,$F5 / POP PSW / RET
+    m_aram[0xFF00] = 0x0D;  // PUSH PSW
+    m_aram[0xFF01] = 0xE4;  // MOV A,dp
+    m_aram[0xFF02] = 0xF5;  // dp = $F5 (port 1)
+    m_aram[0xFF03] = 0x8E;  // POP PSW
+    m_aram[0xFF04] = 0x6F;  // RET
     // Set all 16 TCALL vectors to $FF00
     for (int i = 0; i < 16; i++) {
         uint16_t vecAddr = 0xFFDE - (i * 2);

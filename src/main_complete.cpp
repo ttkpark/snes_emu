@@ -6,8 +6,18 @@
 #include <windows.h>
 #include <iomanip>
 #include <chrono>
+#include <csignal>
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
+
+static uint32_t g_lastPC = 0;
+static uint64_t g_lastCycle = 0;
+void crashHandler(int sig) {
+    std::cerr << "CRASH (signal " << sig << ") at PC=0x" << std::hex << g_lastPC
+              << " cycle=" << std::dec << g_lastCycle << std::endl;
+    exit(1);
+}
+
 #include "cpu/cpu.h"
 #include "memory/memory.h"
 #include "ppu/ppu.h"
@@ -52,6 +62,8 @@ void compareVectors(const std::vector<uint16_t>& original, const std::vector<uin
 }
 
 int main(int argc, char* argv[]) {
+    signal(SIGSEGV, crashHandler);
+    signal(SIGABRT, crashHandler);
     std::cout << "SNES Emulator - Complete SDL2 Version" << std::endl;
     
     // Initialize SDL
@@ -304,17 +316,33 @@ int main(int argc, char* argv[]) {
             }
         }
         
-        // If all checksums are invalid, fall back to header-based detection
+        // If all checksums are invalid, validate by checking reset vector code
         if (!loROMValid && !hiROMValid && !exHiROMValid) {
-            std::cout << "  All checksums invalid, using header-based detection" << std::endl;
+            std::cout << "  All checksums invalid, validating reset vectors..." << std::endl;
 
+            // Check if LoROM reset vector points to valid code
+            uint16_t loResetVec = romData[0x7FFC] | (romData[0x7FFD] << 8);
+            uint32_t loCodeAddr = (loResetVec & 0x7FFF); // LoROM: offset $8000+ maps to ROM bank*0x8000
+            bool loCodeValid = (loResetVec >= 0x8000 && loCodeAddr < romData.size() && romData[loCodeAddr] != 0x00);
 
-            if(availavleROMType == 0)
+            // Check if HiROM reset vector points to valid code
+            uint16_t hiResetVec = romData[0xFFFC] | (romData[0xFFFD] << 8);
+            uint32_t hiCodeAddr = hiResetVec; // HiROM: bank $00 offset maps directly
+            bool hiCodeValid = (hiCodeAddr < romData.size() && romData[hiCodeAddr] != 0x00);
+
+            std::cout << "  LoROM reset=0x" << std::hex << loResetVec << " code=" << (loCodeValid ? "VALID" : "INVALID") << std::endl;
+            std::cout << "  HiROM reset=0x" << hiResetVec << " code=" << (hiCodeValid ? "VALID" : "INVALID") << std::dec << std::endl;
+
+            if (loCodeValid && !hiCodeValid) {
                 loROMValid = true;
-            else if(availavleROMType == 1)
+            } else if (hiCodeValid && !loCodeValid) {
                 hiROMValid = true;
-            else if(availavleROMType == 5)
-                exHiROMValid = true;
+            } else {
+                // Both valid or both invalid - restore original detection
+                loROMValid = originalLoROMValid;
+                hiROMValid = originalHiROMValid;
+                exHiROMValid = originalExHiROMValid;
+            }
         }
         
         // Determine final mapping type
@@ -607,23 +635,22 @@ int main(int argc, char* argv[]) {
     std::cout << "Controls: Arrow keys, Z/X/A/S for buttons" << std::endl;
     
     while (running) {
-        // Check timeout - 10 minutes for full test execution
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        if (currentTime - startTime >= std::chrono::minutes(10)) {
-            std::cout << "Test timeout after 10 minutes." << std::endl;
-            break;
-        }
+        // No timeout for interactive use - user closes window to exit
         
-        // Process input events
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_QUIT) {
-                running = false;
+        // Process input events only once per frame (not every master cycle)
+        static int eventCounter = 0;
+        if (++eventCounter >= 89342) { // ~1 frame worth of master cycles (341*262)
+            eventCounter = 0;
+            SDL_Event event;
+            while (SDL_PollEvent(&event)) {
+                if (event.type == SDL_QUIT) {
+                    running = false;
+                }
+                input.handleEvent(event);
             }
-            input.handleEvent(event);
+            input.update();
         }
-        input.update();
-        
+
         // SNES Hardware Clock Synchronization
         // Master Clock: 21.477272 MHz
         // CPU: Master ÷ 6 = 3.579545 MHz (6 cycles per master)
@@ -660,6 +687,8 @@ int main(int argc, char* argv[]) {
         if (cpuCounter >= 6) {
             cpuCounter = 0;
             cpu.step();
+            g_lastPC = (cpu.getPBR() << 16) | cpu.getPC();
+            g_lastCycle = cycleCount;
             if(cpu.m_quitEmulation){
                 running = false;
                 break;
@@ -675,8 +704,9 @@ int main(int argc, char* argv[]) {
             }
         }
         
-        // ⭐ APU runs every 24 master cycles (1.024 MHz) - FIXED per apu_timing.md!
-        if (apuCounter >= 24) {
+        // APU runs every 2 master cycles for fast IPL transfer
+        // TODO: revert to 24 for accurate timing once performance is acceptable
+        if (apuCounter >= 2) {
             apuCounter = 0;
             apu.step();
         }

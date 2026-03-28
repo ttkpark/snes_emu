@@ -353,26 +353,15 @@ void PPU::renderScanline() {
         uint32_t mainColor = 0x000000FF; // Default to black (0xRRGGBBAA format)
         uint32_t subColor = 0x000000FF;
         
-        // Hardcoded: Only render tiles on the left half of the screen (x < 128)
-        // Right half will remain black (no tiles)
-        if (x < SCREEN_WIDTH / 2) {
-            // Render background layers for Main Screen (left half only)
-            if (m_bgMode == 0) {
-                // Mode 0: 4 layers of 2bpp tiles
-                mainColor = renderBackgroundMode0(x);
-            } else if (m_bgMode == 1) {
-                // Mode 1: BG1/BG2 4bpp, BG3 2bpp
-                mainColor = renderBackgroundMode1(x);
-            } else if (m_bgMode == 6) {
-                // Mode 6: BG1 4bpp hires with offset per tile
-                mainColor = renderBackgroundMode6(x);
-            } else {
-                // Other modes: simple test pattern
-                mainColor = renderTestPattern(x);
-            }
+        // Render background layers for Main Screen
+        if (m_bgMode == 0) {
+            mainColor = renderBackgroundMode0(x);
+        } else if (m_bgMode == 1) {
+            mainColor = renderBackgroundMode1(x);
+        } else if (m_bgMode == 6) {
+            mainColor = renderBackgroundMode6(x);
         } else {
-            // Right half: no tiles, keep black background
-            mainColor = 0x000000FF; // Black (0xRRGGBBAA format)
+            mainColor = renderTestPattern(x);
         }
         
         // Render Sub Screen if enabled
@@ -556,8 +545,12 @@ PixelInfo PPU::renderBGx(int bgIndex, int tileX, int tileY, int pixelX, int pixe
     
     // 3. Extract attributes
     uint16_t tileNumber = tileEntry & 0x03FF;
-    // Palette bits: 2bpp uses bit 10 only (1 bit), 4bpp uses bits 10-12 (3 bits)
-    uint8_t palette = (tileEntry >> 10) & ((bpp == 4) ? 0x07 : 0x01);
+    // Palette bits: 3 bits from tilemap (bits 10-12)
+    // For Mode 0 (2bpp), add BG-specific base: BG1=0, BG2=8, BG3=16, BG4=24
+    uint8_t palette = (tileEntry >> 10) & 0x07;
+    if (bpp == 2) {
+        palette += bgIndex * 8; // Mode 0: each BG uses different CGRAM region
+    }
     bool hFlip = (tileEntry >> 14) & 1;
     bool vFlip = (tileEntry >> 15) & 1;
     uint8_t priorityGroup = (tileEntry >> 13) & 1;
@@ -1106,44 +1099,30 @@ uint32_t PPU::getColor(uint8_t paletteIndex, uint8_t colorIndex) {
 }
 
 uint32_t PPU::getColor(uint8_t paletteIndex, uint8_t colorIndex, int bpp) {
-    // SNES uses 15-bit color (5 bits per channel)
-    // CGRAM stores colors as little-endian 16-bit values
-    
+    // SNES CGRAM: 256 entries (512 bytes), each color is 15-bit RGB
+    // 2bpp: paletteIndex selects from 4-color groups
+    // 4bpp: paletteIndex selects from 16-color groups
+
     uint16_t cgramIndex;
     if (bpp == 2) {
-        // 2bpp: Each palette has 4 colors, starting at paletteIndex * 4
         cgramIndex = (paletteIndex * 4 + colorIndex) * 2;
-    } else {
-        // 4bpp: Each palette has 16 colors, starting at paletteIndex * 16
+    } else if (bpp == 4) {
         cgramIndex = (paletteIndex * 16 + colorIndex) * 2;
+    } else {
+        cgramIndex = colorIndex * 2;
     }
-    
-    if (cgramIndex >= m_cgram.size()) {
-        // Return test colors if CGRAM is not initialized
-        if (paletteIndex == 0) return 0xFF0000FF; // Blue
-        if (paletteIndex == 1) return 0xFF00FF00; // Green  
-        if (paletteIndex == 2) return 0xFFFF0000; // Red
-        return 0x000000FF; // Black (0xRRGGBBAA format) // Black
+
+    if (cgramIndex + 1 >= m_cgram.size()) {
+        return 0x000000FF; // Black
     }
-    
+
     uint16_t snesColor = m_cgram[cgramIndex] | (m_cgram[cgramIndex + 1] << 8);
-    
-    // If CGRAM is empty (all zeros), use test colors
-    if (snesColor == 0) {
-        if (paletteIndex == 0) return 0xFF0000FF; // Blue
-        if (paletteIndex == 1) return 0xFF00FF00; // Green
-        if (paletteIndex == 2) return 0xFFFF0000; // Red
-        if (paletteIndex == 6) return 0xFFFF00FF; // Magenta
-        return 0x000000FF; // Black (0xRRGGBBAA format) // Black
-    }
-    
-    // Extract RGB components (5 bits each)
+
+    // Extract RGB components (5 bits each) and scale to 8 bits
     uint8_t r = (snesColor & 0x1F) << 3;
     uint8_t g = ((snesColor >> 5) & 0x1F) << 3;
     uint8_t b = ((snesColor >> 10) & 0x1F) << 3;
-    
-    // Convert to 32-bit RGBA 
-    // SDL_PIXELFORMAT_RGBA8888 format: 0xRRGGBBAA
+
     return (r << 24) | (g << 16) | (b << 8) | 0xFF;
 }
 
@@ -1544,14 +1523,9 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         case 0x4200: { // NMITIMEN - Interrupt Enable
             m_nmiEnabled = (value & 0x80) != 0;
             static int nmiEnableCount = 0;
-            if (nmiEnableCount < 300) {
-                
-                std::ostringstream oss;
-                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
-                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
-                    << "PPU: NMI " << (m_nmiEnabled ? "ENABLED" : "DISABLED") << std::endl;
-                Logger::getInstance().logPPU(oss.str());
-                Logger::getInstance().flush();  // Flush at frame end
+            if (nmiEnableCount < 10) {
+                std::cout << "PPU: NMI " << (m_nmiEnabled ? "ENABLED" : "DISABLED")
+                          << " (value=$" << std::hex << (int)value << std::dec << ")" << std::endl;
                 nmiEnableCount++;
             }
             break;
@@ -1802,9 +1776,9 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         }
             
         case 0x2107: { // BG1SC - BG1 Tilemap Address
-            m_bg1MapAddr = (value & 0xFC) << 8;
+            m_bg1MapAddr = ((value & 0xFC) << 8) * 2; // Convert word addr to byte addr
             m_bgMapAddr[0] = m_bg1MapAddr; // Sync array
-            m_bgMapSize[0] = (value & 0x80) != 0; // Bit 7: 0=32x32, 1=64x64
+            m_bgMapSize[0] = (value & 0x03); // Bits 0-1: tilemap size
             static int bg1MapCount = 0;
             if (bg1MapCount < 3) {
                 std::ostringstream oss;
@@ -1821,23 +1795,23 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         }
             
         case 0x2108: { // BG2SC - BG2 Tilemap Address
-            m_bg2MapAddr = (value & 0xFC) << 8;
-            m_bgMapAddr[1] = m_bg2MapAddr; // Sync array
-            m_bgMapSize[1] = (value & 0x80) != 0; // Bit 7: 0=32x32, 1=64x64
+            m_bg2MapAddr = ((value & 0xFC) << 8) * 2;
+            m_bgMapAddr[1] = m_bg2MapAddr;
+            m_bgMapSize[1] = (value & 0x03);
             break;
         }
-            
+
         case 0x2109: { // BG3SC - BG3 Tilemap Address
-            m_bg3MapAddr = (value & 0xFC) << 8;
-            m_bgMapAddr[2] = m_bg3MapAddr; // Sync array
-            m_bgMapSize[2] = (value & 0x80) != 0; // Bit 7: 0=32x32, 1=64x64
+            m_bg3MapAddr = ((value & 0xFC) << 8) * 2;
+            m_bgMapAddr[2] = m_bg3MapAddr;
+            m_bgMapSize[2] = (value & 0x03);
             break;
         }
-            
+
         case 0x210A: { // BG4SC - BG4 Tilemap Address
-            m_bg4MapAddr = (value & 0xFC) << 8;
-            m_bgMapAddr[3] = m_bg4MapAddr; // Sync array
-            m_bgMapSize[3] = (value & 0x80) != 0; // Bit 7: 0=32x32, 1=64x64
+            m_bg4MapAddr = ((value & 0xFC) << 8) * 2;
+            m_bgMapAddr[3] = m_bg4MapAddr;
+            m_bgMapSize[3] = (value & 0x03);
             break;
         }
             
