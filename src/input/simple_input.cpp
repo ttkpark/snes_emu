@@ -23,45 +23,23 @@ void SimpleInput::handleEvent(const SDL_Event& event) {
         bool pressed = (event.type == SDL_KEYDOWN);
         SDL_Scancode scancode = event.key.keysym.scancode;
         
-        // Key mapping: A, D, S, Z, X, C = L, R, Y, X, A, B
-        // Enter = Start, Esc = Select
+        // Key mapping: Q=SELECT, E=START, Arrow keys=UDLR
+        // Z=B, X=A, A=Y, S=X, D=L, F=R
         const char* buttonName = nullptr;
         switch (scancode) {
-            case SDL_SCANCODE_A:
-                setButton(BIT_L, pressed);
-                buttonName = "L";
-                break;
-            case SDL_SCANCODE_D:
-                setButton(BIT_R, pressed);
-                buttonName = "R";
-                break;
-            case SDL_SCANCODE_S:
-                setButton(BIT_Y, pressed);
-                buttonName = "Y";
-                break;
-            case SDL_SCANCODE_Z:
-                setButton(BIT_X, pressed);
-                buttonName = "X";
-                break;
-            case SDL_SCANCODE_X:
-                setButton(BIT_A, pressed);
-                buttonName = "A";
-                break;
-            case SDL_SCANCODE_C:
-                setButton(BIT_B, pressed);
-                buttonName = "B";
-                break;
-            case SDL_SCANCODE_RETURN:
-            case SDL_SCANCODE_RETURN2:
-                setButton(BIT_START, pressed);
-                buttonName = "START";
-                break;
-            case SDL_SCANCODE_ESCAPE:
-                setButton(BIT_SELECT, pressed);
-                buttonName = "SELECT";
-                break;
-            default:
-                break;
+            case SDL_SCANCODE_UP:    setButton(BIT_UP, pressed); buttonName = "UP"; break;
+            case SDL_SCANCODE_DOWN:  setButton(BIT_DOWN, pressed); buttonName = "DOWN"; break;
+            case SDL_SCANCODE_LEFT:  setButton(BIT_LEFT, pressed); buttonName = "LEFT"; break;
+            case SDL_SCANCODE_RIGHT: setButton(BIT_RIGHT, pressed); buttonName = "RIGHT"; break;
+            case SDL_SCANCODE_Z:     setButton(BIT_B, pressed); buttonName = "B"; break;
+            case SDL_SCANCODE_X:     setButton(BIT_A, pressed); buttonName = "A"; break;
+            case SDL_SCANCODE_A:     setButton(BIT_Y, pressed); buttonName = "Y"; break;
+            case SDL_SCANCODE_S:     setButton(BIT_X, pressed); buttonName = "X"; break;
+            case SDL_SCANCODE_D:     setButton(BIT_L, pressed); buttonName = "L"; break;
+            case SDL_SCANCODE_F:     setButton(BIT_R, pressed); buttonName = "R"; break;
+            case SDL_SCANCODE_Q:     setButton(BIT_SELECT, pressed); buttonName = "SELECT"; break;
+            case SDL_SCANCODE_E:     setButton(BIT_START, pressed); buttonName = "START"; break;
+            default: break;
         }
         
         if (buttonName) {
@@ -74,14 +52,18 @@ void SimpleInput::updateKeyboardState() {
     const Uint8* keyboardState = SDL_GetKeyboardState(nullptr);
     
     // Update button states based on current keyboard state
-    setButton(BIT_L, keyboardState[SDL_SCANCODE_A] != 0);
-    setButton(BIT_R, keyboardState[SDL_SCANCODE_D] != 0);
-    setButton(BIT_Y, keyboardState[SDL_SCANCODE_S] != 0);
-    setButton(BIT_X, keyboardState[SDL_SCANCODE_Z] != 0);
+    setButton(BIT_UP, keyboardState[SDL_SCANCODE_UP] != 0);
+    setButton(BIT_DOWN, keyboardState[SDL_SCANCODE_DOWN] != 0);
+    setButton(BIT_LEFT, keyboardState[SDL_SCANCODE_LEFT] != 0);
+    setButton(BIT_RIGHT, keyboardState[SDL_SCANCODE_RIGHT] != 0);
+    setButton(BIT_B, keyboardState[SDL_SCANCODE_Z] != 0);
     setButton(BIT_A, keyboardState[SDL_SCANCODE_X] != 0);
-    setButton(BIT_B, keyboardState[SDL_SCANCODE_C] != 0);
-    setButton(BIT_START, keyboardState[SDL_SCANCODE_RETURN] != 0 || keyboardState[SDL_SCANCODE_RETURN2] != 0);
-    setButton(BIT_SELECT, keyboardState[SDL_SCANCODE_ESCAPE] != 0);
+    setButton(BIT_Y, keyboardState[SDL_SCANCODE_A] != 0);
+    setButton(BIT_X, keyboardState[SDL_SCANCODE_S] != 0);
+    setButton(BIT_L, keyboardState[SDL_SCANCODE_D] != 0);
+    setButton(BIT_R, keyboardState[SDL_SCANCODE_F] != 0);
+    setButton(BIT_SELECT, keyboardState[SDL_SCANCODE_Q] != 0);
+    setButton(BIT_START, keyboardState[SDL_SCANCODE_E] != 0);
 }
 
 void SimpleInput::writeStrobe(uint8_t value) {

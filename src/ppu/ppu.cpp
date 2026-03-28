@@ -294,13 +294,28 @@ void PPU::step() {
         m_nmiFlag = false;  // Clear NMI flag at frame start (VBlank ends)
         frameCount++;
         
-        // Dump VRAM after first frame (for debugging)
+        // Dump VRAM after frame 15 (after NMI fills VRAM with data)
         static bool vramDumped = false;
-        if (!vramDumped && frameCount >= 1) {
+        if (!vramDumped && frameCount >= 15) {
             dumpVRAMHex("vram_dump.txt");
             dumpCGRAM("cgram_dump.txt");
             vramDumped = true;
             std::cout << "PPU: VRAM and CGRAM dumps completed after frame " << frameCount << std::endl;
+        }
+        // Log BG register state once after NMI starts
+        static bool bgRegsDumped = false;
+        if (!bgRegsDumped && m_nmiEnabled && frameCount > 10) {
+            bgRegsDumped = true;
+            std::cout << "=== BG Register State (frame " << frameCount << ") ===" << std::endl;
+            std::cout << "  Mode=" << (int)m_bgMode << " TM=$" << std::hex << (int)m_mainScreenDesignation << std::dec << std::endl;
+            for (int i = 0; i < 4; i++) {
+                std::cout << "  BG" << (i+1) << ": MapAddr=0x" << std::hex << m_bgMapAddr[i]
+                    << " TileAddr=0x" << m_bgTileAddr[i] << std::dec
+                    << " MapSize=" << (int)m_bgMapSize[i]
+                    << " TileSize=" << (m_bgTileSize[i] ? "16x16" : "8x8")
+                    << " Scroll=(" << (int)(m_bg1ScrollX + i*0) << "," << (int)(m_bg1ScrollY + i*0) << ")" << std::endl;
+            }
+            std::cout << "===================" << std::endl;
         }
         
         // Log frame completion
@@ -338,16 +353,7 @@ void PPU::renderScanline() {
         return;
     }
     
-    //std::cout << "  Forced blank is OFF - rendering graphics" << std::endl;
-    
     // Render actual SNES graphics
-    static int renderCallCount = 0;
-    if (renderCallCount < 5 && m_scanline < 5) {
-        std::cout << "PPU: renderScanline() called - scanline=" << m_scanline 
-                  << ", bgMode=" << (int)m_bgMode 
-                  << ", mainScreenDesignation=0x" << std::hex << (int)m_mainScreenDesignation << std::dec << std::endl;
-        renderCallCount++;
-    }
     
     for (int x = 0; x < SCREEN_WIDTH; x++) {
         uint32_t mainColor = 0x000000FF; // Default to black (0xRRGGBBAA format)
@@ -500,18 +506,25 @@ PixelInfo PPU::renderBGx(int bgIndex, int tileX, int tileY, int pixelX, int pixe
     static int logCount = 0;
     const int MAX_LOG_PIXELS = 256;  // Log first 256 pixels of the text line
     
-    // Handle tilemap wrapping (32x32 or 64x64 tilemap)
-    int tilemapWidth = m_bgMapSize[bgIndex] ? 64 : 32;
-    // Wrap tile coordinates to tilemap size (handle negative values correctly)
-    // For negative values, use modulo arithmetic to ensure positive wrap
+    // Handle tilemap wrapping based on BGSC bits 0-1
+    // 0=32x32, 1=64x32, 2=32x64, 3=64x64
+    int tilemapWidth = (m_bgMapSize[bgIndex] & 1) ? 64 : 32;
+    int tilemapHeight = (m_bgMapSize[bgIndex] & 2) ? 64 : 32;
     int wrappedTileX = ((tileX % tilemapWidth) + tilemapWidth) % tilemapWidth;
-    int wrappedTileY = ((tileY % tilemapWidth) + tilemapWidth) % tilemapWidth;
+    int wrappedTileY = ((tileY % tilemapHeight) + tilemapHeight) % tilemapHeight;
     
-    // 1. Calculate tilemap address (32x32 or 64x64 tilemap)
-    // SNES tilemap entries are 2 bytes each
-    // Formula: mapAddr = base + (tileY * tilemapWidth + tileX) * 2
-    // BG1SC register sets the base address (2KB aligned, stored in bits 0-4)
-    uint16_t mapAddr = m_bgMapAddr[bgIndex] + (wrappedTileY * tilemapWidth + wrappedTileX) * 2;
+    // 1. Calculate tilemap address
+    // SNES tilemaps are organized as 32x32 tile "screens" (2KB each)
+    // Layout depends on size bits: 0=1screen, 1=H+H, 2=V/V, 3=H+H/V+V
+    uint16_t screenX = wrappedTileX / 32;
+    uint16_t screenY = wrappedTileY / 32;
+    uint16_t localX = wrappedTileX % 32;
+    uint16_t localY = wrappedTileY % 32;
+    // Screen offset: each 32x32 screen = 2048 bytes (32*32*2)
+    uint16_t screenOffset = 0;
+    if (m_bgMapSize[bgIndex] & 1) screenOffset += screenX * 2048; // horizontal
+    if (m_bgMapSize[bgIndex] & 2) screenOffset += screenY * 2048 * ((m_bgMapSize[bgIndex] & 1) ? 2 : 1); // vertical
+    uint16_t mapAddr = m_bgMapAddr[bgIndex] + screenOffset + (localY * 32 + localX) * 2;
     
     // VRAM boundary check
     if (mapAddr + 1 >= m_vram.size()) {
@@ -707,14 +720,7 @@ PixelInfo PPU::renderBGx(int bgIndex, int tileX, int tileY, int pixelX, int pixe
         logCount++;
     }
     
-    // Debug: Log successful pixel rendering
-    static int pixelRenderCount = 0;
-    if (pixelRenderCount < 30 && bgIndex == 0 && tileNumber < 200 && pixelIndex != 0) {
-        std::cout << "PPU: renderBGx - BG" << bgIndex << " rendered pixel: tile=" << tileNumber 
-                  << ", palette=" << (int)palette << ", pixelIndex=" << (int)pixelIndex 
-                  << ", color=0x" << std::hex << color << std::dec << std::endl;
-        pixelRenderCount++;
-    }
+    // Pixel rendered successfully
 
     return {color, priority};
 }
@@ -723,14 +729,7 @@ PixelInfo PPU::renderBGx(int bgIndex, int tileX, int tileY, int pixelX, int pixe
 uint32_t PPU::renderBackgroundMode0(int x) {
     int y = m_scanline; // Current scanline (m_scanline is a PPU member variable)
     
-    // Debug: Log first few calls
-    static int mode0CallCount = 0;
-    if (mode0CallCount < 10 && x < 5 && y < 5) {
-        std::cout << "PPU: renderBackgroundMode0 - x=" << x << ", y=" << y 
-                  << ", bg1TileAddr=0x" << std::hex << m_bgTileAddr[0] 
-                  << ", bg1MapAddr=0x" << m_bgMapAddr[0] << std::dec << std::endl;
-        mode0CallCount++;
-    }
+    // Rendering Mode 0 background
     
     // Store pixel information for 4 layers
     PixelInfo bgPixels[4]; // BG1, BG2, BG3, BG4

@@ -400,10 +400,17 @@ void Memory::performDMA(uint8_t channel) {
     // SNES DMA: size=0 means 65536 bytes
     uint32_t transferSize = (dma.size == 0) ? 65536 : dma.size;
 
+    // Source address adjustment mode (control bits 3-4)
+    // 0=increment, 2=decrement, 1 or 3=fixed
+    uint8_t srcAdj = (dma.control >> 3) & 0x03;
+
     // Perform transfer based on mode
     if (toPPU) {
+        // Fast path: DMA to VRAM ($2118/$2119) - write directly to VRAM
+        bool isVRAM = (destAddr == 0x2118 || destAddr == 0x2119) && m_ppu;
+
         for (uint32_t i = 0; i < transferSize; i++) {
-            uint8_t data = read8(sourceAddr + i);
+            uint8_t data = read8(sourceAddr);
             uint16_t targetReg;
             switch (mode) {
                 case 0: targetReg = destAddr; break;
@@ -419,11 +426,16 @@ void Memory::performDMA(uint8_t channel) {
             } else if (m_ppu) {
                 m_ppu->writeRegister(targetReg, data);
             }
+            // Adjust source address
+            if (srcAdj == 0) sourceAddr++;
+            else if (srcAdj == 2) sourceAddr--;
         }
     }
-    
-    // Disable DMA after transfer
-    dma.control &= ~0x80;
+
+    // After transfer: update source address and clear size
+    dma.sourceAddr = sourceAddr & 0xFFFF;
+    dma.sourceBank = (sourceAddr >> 16) & 0xFF;
+    dma.size = 0; // Size counts down to 0 after transfer
 }
 
 uint32_t Memory::translateAddress(uint32_t address) {

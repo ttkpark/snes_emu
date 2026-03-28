@@ -637,19 +637,8 @@ int main(int argc, char* argv[]) {
     while (running) {
         // No timeout for interactive use - user closes window to exit
         
-        // Process input events only once per frame (not every master cycle)
-        static int eventCounter = 0;
-        if (++eventCounter >= 89342) { // ~1 frame worth of master cycles (341*262)
-            eventCounter = 0;
-            SDL_Event event;
-            while (SDL_PollEvent(&event)) {
-                if (event.type == SDL_QUIT) {
-                    running = false;
-                }
-                input.handleEvent(event);
-            }
-            input.update();
-        }
+        // Process input events at VBlank (when PPU reaches scanline 225)
+        // This ensures input is read before Auto-Joypad captures it
 
         // SNES Hardware Clock Synchronization
         // Master Clock: 21.477272 MHz
@@ -678,6 +667,15 @@ int main(int argc, char* argv[]) {
             
             // Perform Auto-Joypad read at VBlank start
             if (lastScanline != 225 && ppu.getScanline() == 225) {
+                // Process SDL events at VBlank before Auto-Joypad read
+                SDL_Event event;
+                while (SDL_PollEvent(&event)) {
+                    if (event.type == SDL_QUIT) {
+                        running = false;
+                    }
+                    input.handleEvent(event);
+                }
+                input.update();
                 memory.performAutoJoypadRead();
             }
             lastScanline = ppu.getScanline();

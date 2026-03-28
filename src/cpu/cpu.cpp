@@ -812,23 +812,7 @@ void CPU::updateModeFlags() {
     m_modeX = (m_p & 0x10) != 0;  // Bit 4
 }
 void CPU::stackTrace(){
-    if(m_address >= 0x8260 && m_address <= 0x8265)return;
-    std::ostringstream stackOss;
-    stackOss << "Stack Monitor [Cyc:" << m_cycles << "] SP:0x" << std::hex << m_sp << " Stack: ";
-    for (int i = 1; i < 32; i++) {
-        uint8_t val;
-        if (m_emulationMode) {
-            val = m_memory->read8(0x0100 + ((m_sp + i) & 0xFF));
-        } else {
-            // Native mode: Stack is always located in bank $00
-            uint32_t stackAddr = (0x00 << 16) | (m_sp + i);
-            val = m_memory->read8(stackAddr);
-        }
-        stackOss << std::setw(2) << std::setfill('0') << (int)val << " ";
-    }
-    stackOss << std::dec;
-    Logger::getInstance().logCPU(stackOss.str());
-    Logger::getInstance().flush();
+    // Disabled for performance - enable only when debugging
 }
     
 void CPU::pushStack(uint8_t value) {
@@ -1552,17 +1536,7 @@ void CPU::executeInstruction(uint8_t opcode) {
                 setCarry((m_a & 0xFF) >= value);
                 setZero(result == 0);
                 setNegative(result & 0x80);
-                // Debug: Log CMP when comparing with $2140 (APU port 0)
-                if ((effectiveAddr & 0xFFFF) == 0x2140) {
-                    std::ostringstream oss;
-                    oss << "CPU: CMP $2140: A=0x" << std::hex << (int)(m_a & 0xFF) 
-                        << " value=0x" << (int)value 
-                        << " result=0x" << (int)result 
-                        << " Z=" << ((m_p & 0x02) ? "1" : "0")
-                        << " PC=0x" << m_address << std::dec;
-                    Logger::getInstance().logCPU(oss.str());
-                    
-                }
+                // CMP $2140 APU port polling (no debug logging for performance)
             } else {
                 // 16-bit mode
                 uint16_t value = m_memory->read16(effectiveAddr); // Use m_memory->read16 for 24-bit addressing

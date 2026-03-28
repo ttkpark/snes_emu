@@ -116,9 +116,9 @@ private:
     uint16_t m_bgMapAddr[4];   // Tilemap addresses for BG1-4
     uint16_t m_bgTileAddr[4];  // Tile data addresses for BG1-4
     
-    // BG tilemap size settings (from BGSC registers, bit 7)
-    // 0 = 32x32 tiles, 1 = 64x64 tiles
-    bool m_bgMapSize[4];  // Tilemap size for BG1-4
+    // BG tilemap size settings (from BGSC registers, bits 0-1)
+    // 0=32x32, 1=64x32, 2=32x64, 3=64x64
+    uint8_t m_bgMapSize[4];  // Tilemap size for BG1-4
     
     // BG tile size settings (from BGMODE register, bits 3-6)
     // 0 = 8x8 tiles, 1 = 16x16 tiles
