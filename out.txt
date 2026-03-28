@@ -1,0 +1,196 @@
+SNES Emulator - Complete SDL2 Version
+Loading ROM from command line: spctest.sfc
+ROM loaded: 131072 bytes
+Initializing components...
+Connecting components...
+Loading ROM into memory...
+ROM loaded into memory: 131072 bytes
+Font data check at ROM offset 0x4D2C (first 16 bytes): d0 07 78 bf 01 d0 02 2f 03 5f 3c 03 e8 24 8d 01 
+Font data check at ROM offset 0x502C (char '0', first 16 bytes): 56 8e 2f 02 2f 08 f3 02 fb 3f 22 03 2f 1d 3f 22 
+ROM loaded into memory successfully.
+
+=== SNES ROM Mapping Analysis ===
+ROM Size: 131072 bytes
+
+=== ROM Header Analysis ===
+
+=== LoROM Header Analysis ===
+  LoROM Header at 0x7FC0
+  ROM Type (0x7FD5): 0x30 (LoROM)
+  -> LoROM mapping detected
+  ROM Size      : 128KB
+  ROM File Size : 128KB
+
+=== HiROM Header Analysis ===
+  HiROM Header at 0xFFC0
+  ROM Type (0xFFD5): 0x0 (Not HiROM)
+
+=== ExHiROM Header Analysis ===
+  ROM too small for ExHiROM header
+  ROM Size: 131072 bytes
+  Headered ROM: No
+
+=== Checksum Verification ===
+  LoROM Checksum: INVALID
+  All checksums invalid, using header-based detection
+
+=== Final Mapping Determination ===
+  -> LoROM mapping detected
+ROM Mapping set to: LoROM
+
+=== CPU Vector Reading Analysis ===
+ROM Name: SPC-700 TEST         
+[WARN] DSP-1/2/3/4 detected (chipset=0x0) - not implemented; ROM may not run.
+Detected Mapping: LoROM
+Vector Base: 0x7fe0
+
+SNES INTERRUPT VECTORS (native):
+  COP  :  0xFFE4 -> 0x0
+  BRK  :  0xFFE6 -> 0x0
+(Abort):  0xFFE8 -> 0x0
+  NMI  :  0xFFEA -> 0x0
+ (N/A) :  0xFFEC -> 0x0
+  IRQ  :  0xFFEE -> 0x0
+
+SNES INTERRUPT VECTORS (6502 emulation):
+ COP   :  0xFFF4 -> 0x0
+ (N/A) :  0xFFF6 -> 0x0
+(Abort):  0xFFF8 -> 0x0
+ NMI   :  0xFFFA -> 0x0
+ RST   :  0xFFFC -> 0x8000
+ IRQBRK:  0xFFFE -> 0x0
+m_headerPhysicalAddress : 7fe0 = 7fe0
+
+Vector Address Contents:
+  Using Emulation Mode vectors (0xFFF4-0xFFFF)
+  Vector 0: 0x0 -> INVALID ADDRESS
+  Vector 1: 0x0 -> INVALID ADDRESS
+  Vector 2: 0x0 -> INVALID ADDRESS
+  Vector 3: 0x0 -> INVALID ADDRESS
+  Vector 4: 0x8000 -> ROM[0x0] = 0x18 (Unknown)
+  Vector 5: 0x0 -> INVALID ADDRESS
+
+Raw Vector Data:
+  (0xffe0): 0x0  (0xffe1): 0x0
+  (0xffe2): 0x0  (0xffe3): 0x0
+  (0xffe4): 0x0  (0xffe5): 0x0
+  (0xffe6): 0x0  (0xffe7): 0x0
+  (0xffe8): 0x0  (0xffe9): 0x0
+  (0xffea): 0x0  (0xffeb): 0x0
+  (0xffec): 0x0  (0xffed): 0x0
+  (0xffee): 0x0  (0xffef): 0x0
+=== End Vector Analysis ===
+
+About to call ppu.loadROMData()...
+ppu.loadROMData() completed.
+PPU: Video initialized - 256x224
+CPU Reset: Vector=0x8000, PC=0x8000, PBR=0x0
+Initializing PPU registers...
+PPU: BG1HOFS=$0, ScrollX=0x0
+PPU: VMAIN=$0 - Inc size=1, Inc after low byte
+[WARN] Window Masking (W12SEL/W34SEL/WOBJSEL) not implemented - only registers are stored, actual masking does not work.
+[Cyc:0000000000 F:0000] PPU: TM (Main Screen)=$0 (BG1=OFF, BG2=OFF, BG3=OFF, BG4=OFF)
+[WARN] Color Math (CGWSEL/CGADSUB/COLDATA) not implemented - special transparency/lighting effects do not work.
+[WARN] SETINI($2133) - Interlace/Overscan/External Sync not implemented - only registers are stored.
+PPU registers initialized.
+
+=== ORIGINAL ROM HEADER VECTORS ===
+Address: 0000fff4 0000fff6 0000fff8 0000fffa 0000fffc 0000fffe 
+Data:    00000000 00000000 00000000 00000000 00000000 00000000 
+
+=== INITIALIZATION COMPLETE - VECTORS ===
+Address: 0000fff4 0000fff6 0000fff8 0000fffa 0000fffc 0000fffe 
+Data:    00000000 00000000 00000000 00000000 00008000 00000000 
+
+=== VECTOR COMPARISON ===
+Vector Comparison:
+Index | Original | Current  | Status
+------|----------|----------|--------
+  0   | 0x000000 | 0x000000 | SAME
+  1   | 0x000000 | 0x000000 | SAME
+  2   | 0x000000 | 0x000000 | SAME
+  3   | 0x000000 | 0x000000 | SAME
+  4   | 0x000000 | 0x008000 | DIFF
+  5   | 0x000000 | 0x000000 | SAME
+Starting emulation loop...
+Controls: Arrow keys, Z/X/A/S for buttons
+[WARN] PPU timing is simplified (341 dots/scanline, 262 lines). Precise NTSC/PAL timing, H/V-blank DMA windows, and mid-scanline effects are not emulated yet.
+[WARN] CPU timing is simplified; cycle-accurate 65C816 timing (memory wait states, page boundary penalties, DMA stalls) is not fully emulated.
+PPU: BG1HOFS=$0, ScrollX=0x0
+PPU: BG1HOFS=$0, ScrollX=0x0
+PPU: VMAIN=$80 - Inc size=1, Inc after high byte
+[Cyc:0000000029 F:0000] PPU: TM (Main Screen)=$1 (BG1=ON, BG2=OFF, BG3=OFF, BG4=OFF)
+CPU: RTS at PC=0x80b4 pulled addr=0x800d new PC=0x800e new SP=0x1fff
+CPU: RTS at PC=0x8108 pulled addr=0x8010 new PC=0x8011 new SP=0x1fff
+CPU: RTS at PC=0x8119 pulled addr=0x8019 new PC=0x801a new SP=0x1fff
+CPU: RTS at PC=0x8119 pulled addr=0x8022 new PC=0x8023 new SP=0x1fff
+PPU: renderScanline() called - scanline=1, bgMode=0, mainScreenDesignation=0x1
+PPU: renderBackgroundMode0 - x=0, y=1, bg1TileAddr=0x8000, bg1MapAddr=0x0
+PPU: renderBackgroundMode0 - x=1, y=1, bg1TileAddr=0x8000, bg1MapAddr=0x0
+PPU: renderBackgroundMode0 - x=2, y=1, bg1TileAddr=0x8000, bg1MapAddr=0x0
+PPU: renderBackgroundMode0 - x=3, y=1, bg1TileAddr=0x8000, bg1MapAddr=0x0
+PPU: renderBackgroundMode0 - x=4, y=1, bg1TileAddr=0x8000, bg1MapAddr=0x0
+PPU: renderScanline() called - scanline=2, bgMode=0, mainScreenDesignation=0x1
+PPU: renderBackgroundMode0 - x=0, y=2, bg1TileAddr=0x8000, bg1MapAddr=0x0
+PPU: renderBackgroundMode0 - x=1, y=2, bg1TileAddr=0x8000, bg1MapAddr=0x0
+PPU: renderBackgroundMode0 - x=2, y=2, bg1TileAddr=0x8000, bg1MapAddr=0x0
+PPU: renderBackgroundMode0 - x=3, y=2, bg1TileAddr=0x8000, bg1MapAddr=0x0
+PPU: renderBackgroundMode0 - x=4, y=2, bg1TileAddr=0x8000, bg1MapAddr=0x0
+PPU: renderScanline() called - scanline=3, bgMode=0, mainScreenDesignation=0x1
+PPU: renderScanline() called - scanline=4, bgMode=0, mainScreenDesignation=0x1
+PPU: renderBGx - BG0 rendered pixel: tile=82, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=82, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=82, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=82, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=82, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=82, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=105, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=105, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=116, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=116, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=82, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=82, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=82, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=82, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=116, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=116, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=116, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=116, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=82, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=82, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=82, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=82, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=117, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=117, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=117, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=117, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=110, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=110, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=110, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: renderBGx - BG0 rendered pixel: tile=110, palette=0, pixelIndex=1, color=0xf8f8f8ff
+PPU: VRAM hex dump saved to vram_dump.txt
+
+PPU: Key VRAM regions analysis:
+========================================
+BG1 Tilemap (0x0000-0x07FF, 2048 bytes):
+  Non-zero bytes: 28 / 2048
+  Non-zero tilemap entries: 28 / 1024
+  Status: HAS DATA
+
+BG1 Tiles at 0x4000 (2bpp, 16 bytes/tile):
+  Non-zero bytes: 0 / 16384
+  Tiles with data: 0 / 1024
+  Status: ALL ZEROS
+
+BG1 Tiles at 0x8000 (2bpp, 16 bytes/tile):
+  Non-zero bytes: 567 / 16384
+  Tiles with data: 94 / 1024
+  Status: HAS DATA
+
+Overall VRAM statistics:
+  Total non-zero bytes: 595 / 65536 (0%)
+========================================
+
+PPU: CGRAM dump saved to cgram_dump.txt
+PPU: VRAM and CGRAM dumps completed after frame 1
+PPU: renderScanline() called - scanline=0, bgMode=0, mainScreenDesignation=0x1

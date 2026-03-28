@@ -2,108 +2,104 @@
 alwaysApply: true
 ---
 
-프로그램 빌드할때는 루트 디렉토리의 `./build_complete.bat` 파일을 활용해
+일반 실행용은 './build_complete.bat', 디버깅용은 './build_interactive.bat'를 실행해줘
 프로그램 실행할때는 루트 디렉토리의 `./snes_emu_complete.exe`으로 실행해. 
 
-## 프로젝트 목표
-SNES 에뮬레이터를 만드는 것이 목표입니다. 완전한 SNES 하드웨어 에뮬레이션을 통해 SNES 게임과 테스트 ROM을 실행할 수 있도록 구현합니다.
+오류를 해결해야하는데,
+특정 부분을 수정해야 한다면
+./docs  경로의 모든 파일을 찾아 해당 문서를 찾아 명시된 것에서 벗어나지 않는 선에서 수정해줘
+다음은 문서 설명이야.
 
-## 아키텍처 구조
+기본 문서
+README.md: SNES 에뮬레이터 개발 문서 개요 및 단계별 진행 상황
+01_project_setup.md: 프로젝트 설정, CMake 빌드 시스템, SDL2 의존성 설정
+02_architecture_design.md: SNES 하드웨어 아키텍처 분석 및 전체 시스템 구조 설계
+03_cpu_emulation.md: 65c816 CPU 코어 구현, 모든 명령어 지원, 타이밍 에뮬레이션
+04_memory_management.md: SNES 메모리 맵 구현, ROM 헤더 파싱, 메모리 접근 최적화
+05_ppu_emulation.md: PPU 에뮬레이션, 7가지 배경 모드, 스프라이트 렌더링, 색상 팔레트
+06_apu_emulation.md: APU 에뮬레이션, 8개 DSP 채널, 실시간 오디오 출력, 에코/필터 효과
+07_input_handling.md: 키보드/게임패드 입력 처리, SNES 컨트롤러 매핑, Auto-Joypad 구현
+08_rom_loading.md: 다양한 ROM 형식 지원, ROM 헤더 파싱 및 검증, 메모리 맵 설정
+09_debug_system.md: 실시간 디버그 인터페이스, CPU 상태 모니터링, 브레이크포인트 시스템
+10_testing_integration.md: Super Mario World 테스트, 성능 최적화, 버그 수정 및 검증
 
-### CPU (65C816)
-- **위치**: `src/cpu/`
-- **기능**: 메인 CPU 에뮬레이션
-- **특징**: 16비트 모드 지원, 100+ 명령어, 인터럽트 처리 (NMI, IRQ, BRK)
-- **주소 공간**: 24비트 (16MB)
-- **레지스터**: A, X, Y, SP, PC, P (상태 플래그)
+개발 가이드
+AGENT_DEVELOPMENT_GUIDE.md: Agent 친화적 개발 환경, 터미널 기반 디버깅, 무한 루프 감지 시스템
+QUICK_REFERENCE.md: Agent를 위한 빠른 명령어 참조, 빌드/실행/로그 분석 가이드
+README_AGENT.md: Agent 개발자를 위한 프로젝트 개요 및 가이드
 
-### PPU (Picture Processing Unit)
-- **위치**: `src/ppu/`
-- **기능**: 비디오 처리 및 렌더링
-- **특징**: SDL2 비디오 출력, 256x224 해상도, NMI 시스템, 배경 렌더링
-- **레지스터**: 0x2100-0x21FF 범위의 PPU 레지스터 처리
+상태 보고서
+PROJECT_COMPLETE_SUMMARY.md: 프로젝트 완료 요약 및 최종 상태
+COMPLETION_REPORT.md: 완료 보고서 및 구현 현황
+PERFECT_COMPLETION.md: 완벽 완료 보고서
+PHASE_2_3_COMPLETE.md: 2-3단계 완료 보고서
+FINAL_COMPLETION_REPORT.md: 최종 완료 보고서
+FINAL_STATUS_SUMMARY_KR.md: 최종 상태 요약 (한국어)
+SUCCESS_SUMMARY_KR.md: 성공 요약 (한국어)
+DEVELOPMENT_PROGRESS_KR.md: 개발 진행 상황 (한국어)
+DIAGNOSIS_REPORT_KR.md: 진단 보고서 (한국어)
+DIAGNOSTIC_RESULTS.md: 진단 결과
+PROGRESS_REPORT.md: 진행 보고서
+IMPLEMENTATION_STATUS.md: 구현 상태
+CURRENT_STATE_SNAPSHOT.md: 현재 상태 스냅샷
+HANDOFF_SUMMARY.md: 인수인계 요약
+TECHNICAL_REVIEW_UPDATED.md: 기술 검토 업데이트
+RESOURCE_COLLECTION.md: 리소스 모음
+ANSWER_SUMMARY.md: 답변 요약
 
-### APU (Audio Processing Unit)
-- **위치**: `src/apu/`
-- **기능**: 오디오 처리 및 SPC700 CPU 에뮬레이션
-- **특징**: 
-  - **SPC700 CPU**: 8비트 프로세서, 64KB ARAM, I/O 포트 ($F4-$F7)
-  - **DSP**: 디지털 신호 프로세서, 8채널 오디오
-  - **BRR 디코딩**: Bit Rate Reduction 오디오 디코딩
-  - **SDL2 오디오**: 완전한 SDL2 오디오 출력
-- **CPU-APU 통신**: I/O 포트를 통한 통신 ($2140-$2143 CPU 측, $F4-$F7 APU 측)
+하드웨어 문서 (./docs/hardware/)
+io_controller_input.md: SNES 컨트롤러 입력 시스템, 시리얼 통신 프로토콜, Auto-Joypad Read
+mem_memory_map_complete.md: SNES 완전한 메모리 맵, LoROM/HiROM 매핑, 주소 공간 설명
+mem_dma_hdma_complete.md: DMA/HDMA 완전 구현 가이드
+mem_hdma_effects.md: HDMA 효과 및 활용법
+cpu_65816_opcodes.md: 65c816 CPU 명령어 세트 완전 참조
+cpu_addressing_modes.md: CPU 주소 모드 설명
+cpu_interrupt_handling.md: CPU 인터럽트 처리
+cpu_timing.md: CPU 타이밍 및 사이클 정확도
+ppu_s-ppu1.md: PPU1 (Background) 상세 설명
+ppu_s-ppu2.md: PPU2 (Sprite/Color) 상세 설명
+ppu_background_modes.md: PPU 배경 모드 0-7 설명
+ppu_registers_bitmap.md: PPU 레지스터 비트맵 참조
+ppu_vram_format.md: VRAM 포맷 및 타일 데이터 구조
+ppu_timing.md: PPU 타이밍 및 스캔라인 처리
+ppu_color_math_tricks.md: PPU 색상 수학 및 블렌딩
+ppu_mode7_math.md: Mode 7 수학 및 변환
+apu_spc700_instructions.md: SPC700 명령어 세트 참조
+apu_dsp_registers.md: APU DSP 레지스터 완전 참조
+apu_timing.md: APU 타이밍 및 샘플링
+apu_ipl_rom.md: APU IPL ROM 프로토콜 설명
+chip_sa1.md: SA-1 칩 에뮬레이션
+chip_superfx.md: Super FX 칩 에뮬레이션
+chip_dsp_chips.md: DSP 칩 에뮬레이션
+sys_rom_header.md: ROM 헤더 구조 및 파싱
+FILE_ORGANIZATION.md: 하드웨어 문서 파일 조직 구조
 
-### Memory 시스템
-- **위치**: `src/memory/`
-- **기능**: 메모리 관리 및 DMA
-- **특징**: LoROM 매핑, 8채널 DMA, 128KB WRAM, I/O 라우팅
+디버깅 문서 (./docs/debugging/)
+ipl_data_transfer_issue.md: IPL 데이터 전송 문제 분석, SPC700 데이터 전송 중단 원인 분석
+DEBUGGER_DESIGN.md: 디버거 설계 및 구조
+INTERACTIVE_DEBUGGER_GUIDE.md: 인터랙티브 디버거 사용 가이드
+INTERACTIVE_DEBUG_SUMMARY.md: 인터랙티브 디버거 요약
+REALTIME_MONITOR_GUIDE.md: 실시간 모니터링 가이드
+02_loop_detection.md: 무한 루프 감지 시스템
+05_port_communication.md: 포트 통신 디버깅
+06_memory_viewer.md: 메모리 뷰어 사용법
+07_tile_viewer.md: 타일 뷰어 사용법
+08_sprite_viewer.md: 스프라이트 뷰어 사용법
+09_audio_visualizer.md: 오디오 비주얼라이저 사용법
+10_performance_profiling.md: 성능 프로파일링 가이드
+11_automated_testing.md: 자동화 테스트 가이드
+SPCTEST_DEBUG_FINAL_REPORT.md: SPC 테스트 디버깅 최종 보고서
+STEP_BY_STEP_ANALYSIS_RESULT.md: 단계별 분석 결과
+STEP_DEBUG_FINAL_REPORT.md: 단계 디버깅 최종 보고서
+TEST_0x41_ANALYSIS.md: 테스트 0x41 분석
+TEST_0x41_COMPLETE_ANALYSIS.md: 테스트 0x41 완전 분석
+IMPLEMENTATION_SUMMARY.md: 구현 요약
+SUMMARY.md: 디버깅 요약
+README.md: 디버깅 문서 개요
 
-## 테스트 진행 상황
+테스트 ROM 문서 (./docs/test_roms/)
+spctest_expected.md: SPC 테스트 ROM 예상 동작 및 결과
 
-### 완료된 테스트
-- **CPU 테스트**: `cputest-basic.sfc`, `cputest-full.sfc` - 65C816 CPU 명령어 테스트 완료
-- **기본 SNES 테스트**: `SNES Test Program.sfc` - 기본 시스템 테스트 완료
-
-### 진행 중인 테스트
-- **SPC700 테스트**: `spctest.sfc` - SPC700 명령어 세트 종합 테스트 진행 중
-  - **테스트 내용**: 모든 SPC700 opcode (SLEEP, STOP 제외), 모든 주소 모드, 플래그 동작
-  - **현재 상태**: 첫 번째 테스트 세트 (`spc_tests0.asm`) 실행 중
-  - **현재 문제**: `spc_common.inc`의 `main` 루틴에서 실패 발생
-    - SPC가 `fail` 루틴으로 진입하여 무한 루프에 빠짐
-    - CPU는 APU 포트 0이 0이 되기를 기다리지만, SPC가 포트 0을 0x03으로 설정한 후 무한 루프
-    - 원인 분석 중: `cmp $f5, #$01` 명령어 실행 시 문제 발생 가능성
-
-### 테스트 파일 구조
-- **CPU 테스트**: `cputest/` 디렉토리
-- **SPC700 테스트**: `spctest/` 디렉토리
-  - `spc_common.inc`: 공통 SPC700 루틴 (main, init_test, success, fail)
-  - `spc_tests0.asm`, `spc_tests1.asm`, `spc_tests2.asm`: 테스트 케이스들
-  - `spctest.asm`: 메인 CPU 코드
-
-## 현재 디버깅 작업
-- SPC700 테스트 실패 원인 분석 중
-- APU trace 로그 (`apu_trace.log`) 분석하여 SPC700 실행 흐름 추적
-- CPU-APU 포트 통신 검증 중
-- SPC700 명령어 실행 및 플래그 처리 검증 중 
-
-
-프로그램 실행 시 `.\snes_emu_complete.exe spctest.sfc`로 실행하고, 백그라운드 실행 시 `Start-Process`를 사용해.
-
-## 프로그램 종료 확인 방법
-
-프로그램이 끝났는지 확인하는 방법:
-
-### 1. 프로세스 확인
-```powershell
-$process = Get-Process -Name "snes_emu_complete" -ErrorAction SilentlyContinue
-if ($process) { "실행 중" } else { "종료됨" }
-```
-
-### 2. 로그 파일 업데이트 확인
-```powershell
-$lastSize = (Get-Item "apu_trace.log").Length
-Start-Sleep -Seconds 3
-$newSize = (Get-Item "apu_trace.log").Length
-if ($newSize -eq $lastSize) { "멈춤" } else { "실행 중" }
-```
-
-### 3. 표준 출력 메시지
-프로그램 종료 시 다음 메시지 출력:
-- `"Emulation finished."`
-- `"Total CPU instructions executed: <숫자>"`
-- 테스트 실패 시: `"=== SPC TEST FAILED - Reached final loop ==="`
-
-### 4. 포트 2 값 확인
-```powershell
-$lastPort2 = Select-String -Path "apu_trace.log" -Pattern "wrote port 2 = 0x" | Select-Object -Last 1
-```
-- `0x2`: 테스트 실패
-- `0x3`: fail 루틴 진입
-- `0xf3` 등: 테스트 진행 중 (테스트 번호)
-
-## 종료 판단 기준
-프로그램이 종료된 것으로 판단:
-1. 프로세스가 종료됨
-2. "Emulation finished." 메시지 출력
-3. 로그 파일이 3초 이상 업데이트되지 않음
-4. 포트 2 값이 0x2 또는 0x3으로 설정됨
+기타
+cpu_demonstration.txt: CPU 데모 실행 로그
+이 문서들은 SNES 에뮬레이터 개발에 필요한 하드웨어 스펙, 구현 가이드, 디버깅 방법을 포함합니다.

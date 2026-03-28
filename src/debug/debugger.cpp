@@ -87,7 +87,7 @@ void Debugger::showDisassembly() {
 
 void Debugger::showMemory(uint32_t start, uint32_t end) {
     m_showMemory = true;
-    // TODO: 메모리 범위 설정
+    // TODO: Set memory range
 }
 
 void Debugger::showMemoryMap() {
@@ -97,7 +97,7 @@ void Debugger::showMemoryMap() {
 void Debugger::addBreakpoint(uint16_t address) {
     if (std::find(m_breakpoints.begin(), m_breakpoints.end(), address) == m_breakpoints.end()) {
         m_breakpoints.push_back(address);
-        std::cout << "브레이크포인트 추가: $" << this->formatHex(address) << std::endl;
+        std::cout << "Breakpoint added: $" << this->formatHex(address) << std::endl;
     }
 }
 
@@ -105,13 +105,13 @@ void Debugger::removeBreakpoint(uint16_t address) {
     auto it = std::find(m_breakpoints.begin(), m_breakpoints.end(), address);
     if (it != m_breakpoints.end()) {
         m_breakpoints.erase(it);
-        std::cout << "브레이크포인트 제거: $" << this->formatHex(address) << std::endl;
+        std::cout << "Breakpoint removed: $" << this->formatHex(address) << std::endl;
     }
 }
 
 void Debugger::clearBreakpoints() {
     m_breakpoints.clear();
-    std::cout << "모든 브레이크포인트 제거" << std::endl;
+    std::cout << "All breakpoints removed" << std::endl;
 }
 
 bool Debugger::isBreakpoint(uint16_t address) const {
@@ -127,10 +127,10 @@ void Debugger::step() {
 
 void Debugger::stepOver() {
     if (m_paused) {
-        // JSR 명령어인지 확인
+        // Check if JSR instruction
         uint8_t opcode = m_memory->read8(m_cpu->getPC());
         if (opcode == 0x20) { // JSR
-            // 서브루틴 끝까지 실행
+            // Execute until end of subroutine
             executeUntilReturn();
         } else {
             step();
@@ -140,19 +140,19 @@ void Debugger::stepOver() {
 
 void Debugger::stepOut() {
     if (m_paused) {
-        // RTS 명령어까지 실행
+        // Execute until RTS instruction
         executeUntilReturn();
     }
 }
 
 void Debugger::continueExecution() {
     m_paused = false;
-    std::cout << "실행 재개" << std::endl;
+    std::cout << "Resume execution" << std::endl;
 }
 
 void Debugger::pauseExecution() {
     m_paused = true;
-    std::cout << "실행 일시정지" << std::endl;
+    std::cout << "Pause execution" << std::endl;
 }
 
 std::string Debugger::disassemble(uint16_t address) const {
@@ -168,7 +168,7 @@ std::vector<std::string> Debugger::disassembleRange(uint16_t start, uint16_t end
 }
 
 void Debugger::renderCPUState(SDL_Renderer* renderer, int x, int y) {
-    std::string text = "CPU 상태:";
+    std::string text = "CPU Status:";
     this->renderText(renderer, text, x, y);
     y = y + 20;
     
@@ -197,7 +197,7 @@ void Debugger::renderCPUState(SDL_Renderer* renderer, int x, int y) {
 }
 
 void Debugger::renderRegisters(SDL_Renderer* renderer, int x, int y) {
-    std::string text = "레지스터:";
+    std::string text = "Registers:";
     this->renderText(renderer, text, x, y);
     y += 20;
     
@@ -230,7 +230,7 @@ void Debugger::renderFlags(SDL_Renderer* renderer, int x, int y) {
 }
 
 void Debugger::renderDisassembly(SDL_Renderer* renderer, int x, int y) {
-    std::string text = "디스어셈블리:";
+    std::string text = "Disassembly:";
     this->renderText(renderer, text, x, y);
     y += 20;
     
@@ -239,7 +239,7 @@ void Debugger::renderDisassembly(SDL_Renderer* renderer, int x, int y) {
         uint16_t address = startAddress + i;
         std::string disasm = this->disassemble(address);
         
-        // 현재 PC 강조
+        // Highlight current PC
         if (address == m_cpu->getPC()) {
             SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255);
             SDL_Rect rect = {x - 5, y - 2, 400, 16};
@@ -252,7 +252,7 @@ void Debugger::renderDisassembly(SDL_Renderer* renderer, int x, int y) {
 }
 
 void Debugger::renderMemory(SDL_Renderer* renderer, int x, int y) {
-    std::string text = "메모리 덤프:";
+    std::string text = "Memory Dump:";
     this->renderText(renderer, text, x, y);
     y += 20;
     
@@ -271,11 +271,11 @@ void Debugger::renderMemory(SDL_Renderer* renderer, int x, int y) {
 }
 
 void Debugger::renderMemoryMap(SDL_Renderer* renderer, int x, int y) {
-    std::string text = "메모리 맵:";
+    std::string text = "Memory Map:";
     this->renderText(renderer, text, x, y);
     y += 20;
     
-    // TODO: 메모리 맵 정보 표시
+    // TODO: Display memory map information
     text = "Work RAM: 0x000000-0x01FFFF";
     this->renderText(renderer, text, x, y);
     y += 16;
@@ -294,9 +294,9 @@ void Debugger::renderText(SDL_Renderer* renderer, const std::string& text, int x
 }
 
 void Debugger::renderText(SDL_Renderer* renderer, const std::string& text, int x, int y, SDL_Color color) {
-    // 기본 텍스트 렌더링 (SDL2 기본 기능 사용)
-    // TODO: 더 나은 텍스트 렌더링 구현
-    std::cout << "디버그: " << text << std::endl;
+    // Basic text rendering (using SDL2 default functionality)
+    // TODO: Implement better text rendering
+    std::cout << "Debug: " << text << std::endl;
 }
 
 std::string Debugger::formatHex(uint16_t value, int width) const {
@@ -320,12 +320,12 @@ std::string Debugger::formatHex(uint32_t value, int width) const {
 void Debugger::checkBreakpoints() {
     if (isBreakpoint(m_cpu->getPC())) {
         m_paused = true;
-        std::cout << "브레이크포인트에서 정지: $" << this->formatHex(m_cpu->getPC()) << std::endl;
+        std::cout << "Stopped at breakpoint: $" << this->formatHex(m_cpu->getPC()) << std::endl;
     }
 }
 
 void Debugger::executeUntilReturn() {
-    // RTS 명령어까지 실행
+    // Execute until RTS instruction
     while (!m_paused) {
         uint8_t opcode = m_memory->read8(m_cpu->getPC());
         if (opcode == 0x60) { // RTS

@@ -15,6 +15,11 @@ struct PixelInfo {
     uint8_t priority;  // Priority (0-3, higher is more important)
 };
 
+struct TileCache {
+    bool valid = false;
+    uint8_t pixels[8][8];
+};
+
 class PPU {
 public:
     PPU();
@@ -43,6 +48,12 @@ public:
     uint8_t readVRAM(uint16_t address);
     void writeCGRAM(uint8_t address, uint8_t value);
     void writeOAM(uint16_t address, uint8_t value);
+
+    void invalidateTileCache(uint16_t address);
+    TileCache* getTileCacheEntry(uint16_t tileAddr, int bpp);
+    void decode2bpp(const uint8_t* tileData, uint8_t output[8][8]);
+    void decode4bpp(const uint8_t* tileData, uint8_t output[8][8]);
+    void decode8bpp(const uint8_t* tileData, uint8_t output[8][8]);
     
     // ROM data loading
     void loadROMData(const std::vector<uint8_t>& romData);
@@ -156,6 +167,19 @@ private:
     // Color Math settings
     uint8_t m_cgws;        // Color Math control ($2130)
     uint8_t m_cgadsub;     // Color Math settings ($2131)
+    uint8_t m_setini;      // Screen Mode/Video Select ($2133)
+    
+    // Mode 7 registers
+    uint8_t m_m7sel;       // $211A
+    int16_t m_m7a;         // $211B/$211B (signed 16-bit)
+    int16_t m_m7b;         // $211C/$211C
+    int16_t m_m7c;         // $211D/$211D
+    int16_t m_m7d;         // $211E/$211E
+    int16_t m_m7x;         // $211F/$211F (center X)
+    int16_t m_m7y;         // $2120/$2120 (center Y)
+    // Latches for Mode 7 16-bit writes
+    bool m_m7aLatch, m_m7bLatch, m_m7cLatch, m_m7dLatch, m_m7xLatch, m_m7yLatch;
+    uint8_t m_m7aPrev, m_m7bPrev, m_m7cPrev, m_m7dPrev, m_m7xPrev, m_m7yPrev;
     
     // Sprite settings ($2101)
     uint8_t m_objSize;      // Sprite size and name base
@@ -166,6 +190,9 @@ private:
     uint8_t m_vramIncrement;  // Increment size: 0=1, 1=32, 2=128
     uint8_t m_vramMapping;    // Address mapping mode (bits 2-3 of $2115)
     uint8_t m_vramReadBuffer; // VRAM read buffer
+    std::vector<TileCache> m_tileCache2bpp;
+    std::vector<TileCache> m_tileCache4bpp;
+    std::vector<TileCache> m_tileCache8bpp;
     
     // CGRAM (Color Generator RAM) - 512 bytes for palettes
     std::vector<uint8_t> m_cgram;

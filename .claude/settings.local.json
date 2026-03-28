@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./build_complete.bat)",
+      "Bash(timeout 30 ./snes_emu_complete.exe spctest.sfc)",
+      "Read(//c/Users/GH/Desktop/snes_emu/**)",
+      "Bash(timeout 120 ./snes_emu_complete.exe spctest.sfc 2)",
+      "Bash(timeout 15 ./snes_emu_complete.exe spctest.sfc)",
+      "Bash(timeout 15 ./snes_emu_complete.exe spctest.sfc 2)",
+      "Bash(timeout 60 ./snes_emu_complete.exe spctest.sfc)",
+      "Bash(timeout 120 ./snes_emu_complete.exe spctest.sfc)"
+    ]
+  }
+}

@@ -1,88 +1,88 @@
-# SNES 에뮬레이터 개발 문서
+# SNES Emulator Development Documentation
 
-이 폴더는 SNES 에뮬레이터 개발 과정을 단계별로 문서화한 것입니다.
+This folder contains step-by-step documentation of the SNES emulator development process.
 
-## 개발 단계
+## Development Phases
 
-### 1단계: 프로젝트 설정 ✅
-- [01_project_setup.md](01_project_setup.md) - 프로젝트 구조 설정 및 기본 디렉토리 생성
-- [02_architecture_design.md](02_architecture_design.md) - SNES 에뮬레이터 아키텍처 설계 및 문서화
+### Phase 1: Project Setup ✅
+- [01_project_setup.md](01_project_setup.md) - Project structure setup and basic directory creation
+- [02_architecture_design.md](02_architecture_design.md) - SNES emulator architecture design and documentation
 
-### 2단계: 핵심 컴포넌트 구현
-- [03_cpu_emulation.md](03_cpu_emulation.md) - 65c816 CPU 코어 구현
-- [04_memory_management.md](04_memory_management.md) - 메모리 매핑 및 관리 시스템 구현
-- [05_ppu_emulation.md](05_ppu_emulation.md) - PPU (Picture Processing Unit) 에뮬레이션
-- [06_apu_emulation.md](06_apu_emulation.md) - APU (Audio Processing Unit) 에뮬레이션
+### Phase 2: Core Component Implementation
+- [03_cpu_emulation.md](03_cpu_emulation.md) - 65c816 CPU core implementation
+- [04_memory_management.md](04_memory_management.md) - Memory mapping and management system implementation
+- [05_ppu_emulation.md](05_ppu_emulation.md) - PPU (Picture Processing Unit) emulation
+- [06_apu_emulation.md](06_apu_emulation.md) - APU (Audio Processing Unit) emulation
 
-### 3단계: 시스템 통합
-- [07_input_handling.md](07_input_handling.md) - 입력 처리 시스템 구현
-- [08_rom_loading.md](08_rom_loading.md) - ROM 로딩 및 파싱 시스템
-- [09_debug_system.md](09_debug_system.md) - 디버그 화면 및 개발자 도구 구현
+### Phase 3: System Integration
+- [07_input_handling.md](07_input_handling.md) - Input handling system implementation
+- [08_rom_loading.md](08_rom_loading.md) - ROM loading and parsing system
+- [09_debug_system.md](09_debug_system.md) - Debug screen and developer tools implementation
 
-### 4단계: 테스트 및 최적화
-- [10_testing_integration.md](10_testing_integration.md) - Super Mario World 테스트 및 최적화
+### Phase 4: Testing and Optimization
+- [10_testing_integration.md](10_testing_integration.md) - Super Mario World testing and optimization
 
-## 현재 상태
+## Current Status
 
-### 완료된 작업
-- ✅ 프로젝트 구조 설정
-- ✅ 기본 클래스 구조 생성
-- ✅ CMake 빌드 시스템 설정
-- ✅ 아키텍처 설계 및 문서화
+### Completed Tasks
+- ✅ Project structure setup
+- ✅ Basic class structure creation
+- ✅ CMake build system setup
+- ✅ Architecture design and documentation
 
-### 진행 중인 작업
-- 🔄 65c816 CPU 코어 구현 (기본 구조 완성)
-- 🔄 메모리 관리 시스템 구현 (기본 구조 완성)
-- 🔄 PPU 에뮬레이션 (기본 구조 완성)
-- 🔄 APU 에뮬레이션 (기본 구조 완성)
-- 🔄 입력 처리 시스템 (기본 구조 완성)
-- 🔄 디버그 시스템 (기본 구조 완성)
+### In Progress
+- 🔄 65c816 CPU core implementation (basic structure completed)
+- 🔄 Memory management system implementation (basic structure completed)
+- 🔄 PPU emulation (basic structure completed)
+- 🔄 APU emulation (basic structure completed)
+- 🔄 Input handling system (basic structure completed)
+- 🔄 Debug system (basic structure completed)
 
-### 다음 단계
-1. CPU 명령어 완전 구현
-2. 메모리 매핑 시스템 완성
-3. PPU 렌더링 엔진 구현
-4. APU 오디오 처리 구현
-5. ROM 로딩 시스템 구현
-6. 디버그 인터페이스 완성
-7. Super Mario World 테스트
+### Next Steps
+1. Complete CPU instruction implementation
+2. Complete memory mapping system
+3. Implement PPU rendering engine
+4. Implement APU audio processing
+5. Implement ROM loading system
+6. Complete debug interface
+7. Super Mario World testing
 
-## 빌드 및 실행
+## Build and Run
 
 ### Windows
 ```bash
-# 빌드
+# Build
 build.bat
 
-# 실행
+# Run
 build\bin\snes_emu.exe
 ```
 
 ### Linux/macOS
 ```bash
-# 빌드
+# Build
 mkdir build
 cd build
 cmake ..
 make
 
-# 실행
+# Run
 ./snes_emu
 ```
 
-## 개발 환경
+## Development Environment
 
-- **언어**: C++17
+- **Language**: C++17
 - **GUI**: SDL2
-- **빌드**: CMake
-- **플랫폼**: Windows, Linux, macOS
+- **Build**: CMake
+- **Platform**: Windows, Linux, macOS
 
-## 목표
+## Goal
 
-Super Mario World를 완벽하게 실행할 수 있는 SNES 에뮬레이터를 만드는 것입니다.
+To create a SNES emulator that can perfectly run Super Mario World.
 
-## 참고 자료
+## References
 
-- [SNES 개발 문서](https://wiki.superfamicom.org/)
-- [65c816 CPU 문서](https://en.wikipedia.org/wiki/WDC_65C816)
-- [SDL2 문서](https://wiki.libsdl.org/)
+- [SNES Development Documentation](https://wiki.superfamicom.org/)
+- [65c816 CPU Documentation](https://en.wikipedia.org/wiki/WDC_65C816)
+- [SDL2 Documentation](https://wiki.libsdl.org/)

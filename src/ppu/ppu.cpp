@@ -59,6 +59,16 @@ PPU::PPU()
     , m_tsw(0)
     , m_cgws(0)
     , m_cgadsub(0)
+    , m_setini(0)
+    , m_m7sel(0)
+    , m_m7a(0)
+    , m_m7b(0)
+    , m_m7c(0)
+    , m_m7d(0)
+    , m_m7x(0)
+    , m_m7y(0)
+    , m_m7aLatch(false), m_m7bLatch(false), m_m7cLatch(false), m_m7dLatch(false), m_m7xLatch(false), m_m7yLatch(false)
+    , m_m7aPrev(0), m_m7bPrev(0), m_m7cPrev(0), m_m7dPrev(0), m_m7xPrev(0), m_m7yPrev(0)
     , m_objSize(0)
     , m_vramAddress(0)
     , m_vramIncrement(0)
@@ -81,6 +91,9 @@ PPU::PPU()
     m_cgram.resize(512, 0);
     m_oam.resize(544, 0);
     m_framebuffer = new uint32_t[SCREEN_WIDTH * SCREEN_HEIGHT];
+    m_tileCache2bpp.resize(m_vram.size() / 16);
+    m_tileCache4bpp.resize(m_vram.size() / 32);
+    m_tileCache8bpp.resize(m_vram.size() / 64);
     
     // Initialize BG address arrays
     m_bgMapAddr[0] = 0;  // BG1
@@ -238,6 +251,11 @@ void PPU::step() {
     static int frameCount = 0;
     static int logCount = 0;
     static int stepCount = 0;
+    static bool warnedTiming = false;
+    if (!warnedTiming) {
+        std::cout << "[WARN] PPU timing is simplified (341 dots/scanline, 262 lines). Precise NTSC/PAL timing, H/V-blank DMA windows, and mid-scanline effects are not emulated yet." << std::endl;
+        warnedTiming = true;
+    }
     
     // Increment dot counter (341 dots per scanline)
     m_dot++;
@@ -671,67 +689,12 @@ PixelInfo PPU::renderBGx(int bgIndex, int tileX, int tileY, int pixelX, int pixe
         return {0, 0};
     }
     
-    // 6. Decode tile data (2bpp or 4bpp)
-    // Use sub-tile pixel coordinates (always 8x8 sub-tile, even for 16x16 tiles)
-    uint8_t pixelIndex = 0;
-    int line_offset = subPixelY*2;  // Always 0-7 for 8x8 sub-tile
-    int bitPos = 7 - subPixelX;  // Always 0-7 for 8x8 sub-tile
-    
-    // Debug: Log first few tile reads
-    static int tileReadCount = 0;
-    if (tileReadCount < 20 && bgIndex == 0 && tileNumber < 200) {
-        std::cout << "PPU: renderBGx - BG" << bgIndex << " Tile " << tileNumber 
-                  << " @ 0x" << std::hex << tileAddr << " (bpp=" << std::dec << bpp 
-                  << ", pixelX=" << pixelX << ", pixelY=" << pixelY << ")" << std::endl;
-        tileReadCount++;
+    TileCache* tileCache = getTileCacheEntry(tileAddr, bpp);
+    if (!tileCache) {
+        return {0, 0};
     }
     
-    if (bpp == 2) {
-        // 2bpp: 2 bitplanes, 16 bytes per tile
-        uint8_t plane0_byte = m_vram[tileAddr + line_offset];
-        uint8_t plane1_byte = m_vram[tileAddr + line_offset + 1];
-        
-        // Detailed logging for text line
-        if (shouldLog && logCount < MAX_LOG_PIXELS && (tileEntry & 0x03FF) != 0x0000) {
-            std::ostringstream oss;
-            oss << "  [STEP8] Tile decode: line_offset=" << line_offset 
-                << ", bitPos=" << bitPos << std::endl;
-            oss << "    plane0_byte=0x" << std::hex << (int)plane0_byte 
-                << " (VRAM[0x" << (tileAddr + line_offset) << "])" << std::dec << std::endl;
-            oss << "    plane1_byte=0x" << std::hex << (int)plane1_byte 
-                << " (VRAM[0x" << (tileAddr + line_offset + 8) << "])" << std::dec << std::endl;
-            Logger::getInstance().logPPU(oss.str());
-        }
-        
-        pixelIndex = ((plane0_byte >> bitPos) & 1) | 
-                     (((plane1_byte >> bitPos) & 1) << 1);
-        
-        // Detailed logging for text line
-        if (shouldLog && logCount < MAX_LOG_PIXELS && (tileEntry & 0x03FF) != 0x0000) {
-            std::ostringstream oss;
-            oss << "  [STEP9] Pixel index: pixelIndex=" << (int)pixelIndex 
-                << " (plane0_bit=" << ((plane0_byte >> bitPos) & 1) 
-                << ", plane1_bit=" << ((plane1_byte >> bitPos) & 1) << ")" << std::endl;
-            Logger::getInstance().logPPU(oss.str());
-        }
-    } else {
-        // 4bpp: 4 bitplanes, 32 bytes per tile
-        // Plane 0: bytes 0-7
-        // Plane 1: bytes 8-15
-        // Plane 2: bytes 16-23
-        // Plane 3: bytes 24-31
-        uint8_t plane0_byte = m_vram[tileAddr + line_offset];
-        uint8_t plane1_byte = m_vram[tileAddr + line_offset + 8];
-        uint8_t plane2_byte = m_vram[tileAddr + line_offset + 16];
-        uint8_t plane3_byte = m_vram[tileAddr + line_offset + 24];
-        
-        pixelIndex = ((plane0_byte >> bitPos) & 1) |
-                     (((plane1_byte >> bitPos) & 1) << 1) |
-                     (((plane2_byte >> bitPos) & 1) << 2) |
-                     (((plane3_byte >> bitPos) & 1) << 3);
-    }
-    
-    // 7. Determine transparency and final color/priority
+    uint8_t pixelIndex = tileCache->pixels[subPixelY][subPixelX];
     if (pixelIndex == 0) {
         return {0, 0}; // Transparent (background color)
     }
@@ -1552,6 +1515,10 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
     Logger::getInstance().logPPU(oss.str());
         // Don't flush here - too frequent, causes performance issues
     }
+    // Static warning flags (declared outside switch to avoid initialization issues)
+    static bool warnedWindow = false;
+    static bool warnedColorMath = false;
+    
     switch (address) {
         case 0x2100: { // INIDISP - Screen Display
             m_brightness = value & 0x0F;
@@ -1732,37 +1699,73 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         }
             
         case 0x211A: { // M7SEL - Mode 7 Settings
-            // Mode 7 not fully implemented yet, but accept writes silently
+            m_m7sel = value;
             break;
         }
             
-        case 0x211B: { // M7A - Mode 7 Matrix A (low byte)
-            // Mode 7 not fully implemented yet, but accept writes silently
+        case 0x211B: { // M7A - Mode 7 Matrix A (low byte / high byte)
+            if (!m_m7aLatch) {
+                m_m7aPrev = value;
+                m_m7aLatch = true;
+            } else {
+                m_m7a = (int16_t)((value << 8) | m_m7aPrev);
+                m_m7aLatch = false;
+            }
             break;
         }
             
-        case 0x211C: { // M7B - Mode 7 Matrix B (low byte)
-            // Mode 7 not fully implemented yet, but accept writes silently
+        case 0x211C: { // M7B - Mode 7 Matrix B (low byte / high byte)
+            if (!m_m7bLatch) {
+                m_m7bPrev = value;
+                m_m7bLatch = true;
+            } else {
+                m_m7b = (int16_t)((value << 8) | m_m7bPrev);
+                m_m7bLatch = false;
+            }
             break;
         }
             
-        case 0x211D: { // M7C - Mode 7 Matrix C (low byte)
-            // Mode 7 not fully implemented yet, but accept writes silently
+        case 0x211D: { // M7C - Mode 7 Matrix C (low byte / high byte)
+            if (!m_m7cLatch) {
+                m_m7cPrev = value;
+                m_m7cLatch = true;
+            } else {
+                m_m7c = (int16_t)((value << 8) | m_m7cPrev);
+                m_m7cLatch = false;
+            }
             break;
         }
             
-        case 0x211E: { // M7D - Mode 7 Matrix D (low byte)
-            // Mode 7 not fully implemented yet, but accept writes silently
+        case 0x211E: { // M7D - Mode 7 Matrix D (low byte / high byte)
+            if (!m_m7dLatch) {
+                m_m7dPrev = value;
+                m_m7dLatch = true;
+            } else {
+                m_m7d = (int16_t)((value << 8) | m_m7dPrev);
+                m_m7dLatch = false;
+            }
             break;
         }
             
-        case 0x211F: { // M7X - Mode 7 Center X (low byte)
-            // Mode 7 not fully implemented yet, but accept writes silently
+        case 0x211F: { // M7X - Mode 7 Center X (low byte / high byte)
+            if (!m_m7xLatch) {
+                m_m7xPrev = value;
+                m_m7xLatch = true;
+            } else {
+                m_m7x = (int16_t)((value << 8) | m_m7xPrev);
+                m_m7xLatch = false;
+            }
             break;
         }
             
-        case 0x2120: { // M7Y - Mode 7 Center Y (low byte)
-            // Mode 7 not fully implemented yet, but accept writes silently
+        case 0x2120: { // M7Y - Mode 7 Center Y (low byte / high byte)
+            if (!m_m7yLatch) {
+                m_m7yPrev = value;
+                m_m7yLatch = true;
+            } else {
+                m_m7y = (int16_t)((value << 8) | m_m7yPrev);
+                m_m7yLatch = false;
+            }
             break;
         }
             
@@ -2024,6 +2027,10 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             
         case 0x2123: // W12SEL - Window Mask Settings for BG1 and BG2
             m_w12sel = value;
+            if (!warnedWindow) {
+                std::cout << "[WARN] Window Masking (W12SEL/W34SEL/WOBJSEL) not implemented - only registers are stored, actual masking does not work." << std::endl;
+                warnedWindow = true;
+            }
             break;
             
         case 0x2124: // W34SEL - Window Mask Settings for BG3 and BG4
@@ -2068,6 +2075,10 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             
         case 0x2130: // CGWSEL - Color Math Control
             m_cgws = value;
+            if (!warnedColorMath) {
+                std::cout << "[WARN] Color Math (CGWSEL/CGADSUB/COLDATA) not implemented - special transparency/lighting effects do not work." << std::endl;
+                warnedColorMath = true;
+            }
             break;
             
         case 0x2131: // CGADSUB - Color Math Settings
@@ -2075,12 +2086,21 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             break;
             
         case 0x2132: // COLDATA - Fixed Color Data
-            // Ignore for now
+            // Store for potential future use; currently not implemented
             break;
             
-        case 0x2133: // SETINI - Screen Mode/Video Select
-            // Ignore for now
+        case 0x2133: { // SETINI - Screen Mode/Video Select
+            m_setini = value;
+            static bool warnedSETINI = false;
+            if (!warnedSETINI) {
+                std::cout << "[WARN] SETINI($2133) - Interlace/Overscan/External Sync not implemented - only registers are stored." << std::endl;
+                if (value & 0x40) { // Bit 6: EXTBG (Mode 7 extended BG2)
+                    std::cout << "[WARN] Mode 7 EXTBG (SETINI bit 6) not implemented - BG2 priority layer does not work." << std::endl;
+                }
+                warnedSETINI = true;
+            }
             break;
+        }
             
         default:
             // Log unimplemented register writes
@@ -2245,6 +2265,7 @@ const char* PPU::getRDNMIHistoryString() {
 void PPU::writeVRAM(uint16_t address, uint8_t value) {
     if (address < m_vram.size()) {
         m_vram[address] = value;
+        invalidateTileCache(address);
         
         // Convert ASCII hex digits to values helper
         auto hexToValue = [](uint8_t c) -> uint8_t {
@@ -2378,6 +2399,111 @@ void PPU::writeCGRAM(uint8_t address, uint8_t value) {
 void PPU::writeOAM(uint16_t address, uint8_t value) {
     if (address < m_oam.size()) {
         m_oam[address] = value;
+    }
+}
+
+void PPU::invalidateTileCache(uint16_t address) {
+    auto invalidate = [&](std::vector<TileCache>& cache, uint16_t tileSize) {
+        uint32_t idx = address / tileSize;
+        if (idx < cache.size()) {
+            cache[idx].valid = false;
+        }
+    };
+
+    invalidate(m_tileCache2bpp, 16);
+    invalidate(m_tileCache4bpp, 32);
+    invalidate(m_tileCache8bpp, 64);
+}
+
+TileCache* PPU::getTileCacheEntry(uint16_t tileAddr, int bpp) {
+    uint32_t idx = 0;
+    std::vector<TileCache>* cache = nullptr;
+    uint16_t tileSize = 0;
+
+    switch (bpp) {
+        case 2:
+            tileSize = 16;
+            cache = &m_tileCache2bpp;
+            break;
+        case 4:
+            tileSize = 32;
+            cache = &m_tileCache4bpp;
+            break;
+        case 8:
+            tileSize = 64;
+            cache = &m_tileCache8bpp;
+            break;
+        default:
+            return nullptr;
+    }
+
+    idx = tileAddr / tileSize;
+    if (idx >= cache->size()) {
+        return nullptr;
+    }
+
+    TileCache& entry = (*cache)[idx];
+    if (!entry.valid) {
+        const uint8_t* tileData = &m_vram[tileAddr];
+        switch (bpp) {
+            case 2: decode2bpp(tileData, entry.pixels); break;
+            case 4: decode4bpp(tileData, entry.pixels); break;
+            case 8: decode8bpp(tileData, entry.pixels); break;
+        }
+        entry.valid = true;
+    }
+
+    return &entry;
+}
+
+void PPU::decode2bpp(const uint8_t* tileData, uint8_t output[8][8]) {
+    for (int y = 0; y < 8; ++y) {
+        uint8_t plane0 = tileData[y * 2 + 0];
+        uint8_t plane1 = tileData[y * 2 + 1];
+
+        for (int x = 0; x < 8; ++x) {
+            int bitPos = 7 - x;
+            uint8_t bit0 = (plane0 >> bitPos) & 1;
+            uint8_t bit1 = (plane1 >> bitPos) & 1;
+            output[y][x] = (bit1 << 1) | bit0;
+        }
+    }
+}
+
+void PPU::decode4bpp(const uint8_t* tileData, uint8_t output[8][8]) {
+    for (int y = 0; y < 8; ++y) {
+        uint8_t plane0 = tileData[y * 2 + 0];
+        uint8_t plane1 = tileData[y * 2 + 1];
+        uint8_t plane2 = tileData[16 + y * 2 + 0];
+        uint8_t plane3 = tileData[16 + y * 2 + 1];
+
+        for (int x = 0; x < 8; ++x) {
+            int bitPos = 7 - x;
+            uint8_t bit0 = (plane0 >> bitPos) & 1;
+            uint8_t bit1 = (plane1 >> bitPos) & 1;
+            uint8_t bit2 = (plane2 >> bitPos) & 1;
+            uint8_t bit3 = (plane3 >> bitPos) & 1;
+            output[y][x] = (bit3 << 3) | (bit2 << 2) | (bit1 << 1) | bit0;
+        }
+    }
+}
+
+void PPU::decode8bpp(const uint8_t* tileData, uint8_t output[8][8]) {
+    for (int y = 0; y < 8; ++y) {
+        uint8_t planes[8];
+        for (int p = 0; p < 8; ++p) {
+            uint16_t base = (p / 2) * 16;
+            planes[p] = tileData[base + y * 2 + (p & 1)];
+        }
+
+        for (int x = 0; x < 8; ++x) {
+            int bitPos = 7 - x;
+            uint8_t color = 0;
+            for (int p = 0; p < 8; ++p) {
+                color |= ((planes[p] >> bitPos) & 1) << p;
+            }
+            output[y][x] = color;
+        }
     }
 }
 

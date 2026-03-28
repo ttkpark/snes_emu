@@ -76,6 +76,12 @@ void CPU::reset() {
 }
 
 void CPU::step() {
+    static bool warnedTiming = false;
+    if (!warnedTiming) {
+        std::cout << "[WARN] CPU timing is simplified; cycle-accurate 65C816 timing (memory wait states, page boundary penalties, DMA stalls) is not fully emulated." << std::endl;
+        warnedTiming = true;
+    }
+
     // Infinite loop detection
     uint32_t currentPC = m_address;  // Full address: PBR + PC
     
@@ -838,7 +844,7 @@ void CPU::stackTrace(){
         if (m_emulationMode) {
             val = m_memory->read8(0x0100 + ((m_sp + i) & 0xFF));
         } else {
-            // 네이티브 모드: 스택은 항상 은행 $00에 위치
+            // Native mode: Stack is always located in bank $00
             uint32_t stackAddr = (0x00 << 16) | (m_sp + i);
             val = m_memory->read8(stackAddr);
         }
@@ -851,7 +857,7 @@ void CPU::stackTrace(){
     
 void CPU::pushStack(uint8_t value) {
     if(!m_emulationMode) {
-        // 네이티브 모드: 스택은 항상 은행 $00에 위치
+        // Native mode: Stack is always located in bank $00
         uint32_t stackAddr = (0x00 << 16) | m_sp;
         m_memory->write8(stackAddr, value);
         m_sp--;
@@ -868,7 +874,7 @@ void CPU::pushStack16(uint16_t value) {
 }
 uint8_t CPU::pullStack() {
     if(!m_emulationMode) {
-        // 네이티브 모드: 스택은 항상 은행 $00에 위치
+        // Native mode: Stack is always located in bank $00
         m_sp++;
         uint32_t stackAddr = (0x00 << 16) | m_sp;
         return m_memory->read8(stackAddr);
@@ -4722,7 +4728,7 @@ void CPU::executeInstruction(uint8_t opcode) {
                 
                 setCarry(result > 0xFF);
                 setOverflow((~(a8 ^ value) & (a8 ^ result) & 0x80) != 0);
-                m_a = (m_a & 0xFF00) | (result & 0xFF); // A_H 보존
+                m_a = (m_a & 0xFF00) | (result & 0xFF); // Preserve A_H
                 setZeroNegative8(result);
             } else {
                 // 16-bit mode (m=0, m_modeM=false)

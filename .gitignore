@@ -1,3 +1,37 @@
-/roms
+# Build artifacts
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# Logs and dumps
+*.log
+*_dump.txt
+*_trace.log
+stdout.txt
+build_log.txt
+build_output.txt
+
+# ROM files (large binaries, keep test ROMs tracked)
+/roms/
+*.smc
 /SNES Test Program.sfc
 /Super Mario World (Europe) (Rev 1).sfc
+
+# IDE / Editor
+.vs/
+.vscode/
+*.suo
+*.user
+*.sln.docstates
+
+# Temp analysis scripts
+*.ps1
+!build_*.bat
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
