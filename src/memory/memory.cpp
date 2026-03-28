@@ -435,7 +435,9 @@ void Memory::performDMA(uint8_t channel) {
     // After transfer: update source address and clear size
     dma.sourceAddr = sourceAddr & 0xFFFF;
     dma.sourceBank = (sourceAddr >> 16) & 0xFF;
-    dma.size = 0; // Size counts down to 0 after transfer
+    dma.size = 0;
+    // DMA consumes ~8 master cycles per byte transferred
+    m_dmaCyclesPending += transferSize * 8;
 }
 
 uint32_t Memory::translateAddress(uint32_t address) {
@@ -619,7 +621,14 @@ void Memory::performAutoJoypadRead() {
             joy1 |= (bit << i);
         }
         m_joypadData[0] = joy1;
-        
+        if (joy1 != 0) {
+            static int joyLogCount = 0;
+            if (joyLogCount < 30) {
+                std::cout << "[JOYPAD] joy1=0x" << std::hex << joy1 << std::dec << std::endl;
+                joyLogCount++;
+            }
+        }
+
         // Controller 2: 16-bit read
         uint16_t joy2 = 0;
         m_input->writeStrobe(1);

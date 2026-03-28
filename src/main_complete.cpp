@@ -637,100 +637,77 @@ int main(int argc, char* argv[]) {
     while (running) {
         // No timeout for interactive use - user closes window to exit
         
-        // Process input events at VBlank (when PPU reaches scanline 225)
-        // This ensures input is read before Auto-Joypad captures it
-
-        // SNES Hardware Clock Synchronization
-        // Master Clock: 21.477272 MHz
-        // CPU: Master ÷ 6 = 3.579545 MHz (6 cycles per master)
-        // PPU: Master ÷ 4 = 5.369318 MHz (4 cycles per master) 
-        // APU: Master ÷ 8 = 2.684659 MHz (8 cycles per master)
-        
-        // Use a more accurate synchronization approach
-        // Track counters for each component independently
-        static int ppuCounter = 0;  // PPU runs every 4 master cycles
-        static int cpuCounter = 0;   // CPU runs every 6 master cycles
-        static int apuCounter = 0;   // ⭐ APU runs every 24 master cycles (1.024 MHz) - FIXED!
-        
-        // Run one master clock cycle
-        ppuCounter++;
-        cpuCounter++;
-        apuCounter++;
-        
-        // PPU runs every 4 master cycles (5.37MHz) - Run PPU first to ensure scanline is updated
-        // This ensures PPU progresses even when CPU is stuck in VBlank wait loop
-        static int lastScanline = -1;
-        if (ppuCounter >= 4) {
-            ppuCounter = 0;
-            int currentScanline = ppu.getScanline();
-            ppu.step();
-            
-            // Perform Auto-Joypad read at VBlank start
-            if (lastScanline != 225 && ppu.getScanline() == 225) {
-                // Process SDL events at VBlank before Auto-Joypad read
-                SDL_Event event;
-                while (SDL_PollEvent(&event)) {
-                    if (event.type == SDL_QUIT) {
-                        running = false;
-                    }
-                    input.handleEvent(event);
+        // Process SDL events once per frame
+        {
+            SDL_Event event;
+            while (SDL_PollEvent(&event)) {
+                if (event.type == SDL_QUIT) {
+                    running = false;
                 }
-                input.update();
-                memory.performAutoJoypadRead();
-            }
-            lastScanline = ppu.getScanline();
-        }
-        
-        // CPU runs every 6 master cycles (3.58MHz)
-        if (cpuCounter >= 6) {
-            cpuCounter = 0;
-            cpu.step();
-            g_lastPC = (cpu.getPBR() << 16) | cpu.getPC();
-            g_lastCycle = cycleCount;
-            if(cpu.m_quitEmulation){
-                running = false;
-                break;
-            }
-            cycleCount++;
-            
-            // Check cycle limit
-            if (cycleLimit > 0 && cycleCount >= cycleLimit) {
-                std::cout << "\n=== CYCLE LIMIT REACHED ===" << std::endl;
-                std::cout << "Stopped at " << cycleCount << " CPU cycles" << std::endl;
-                running = false;
-                break;
+                input.handleEvent(event);
             }
         }
-        
-        // APU runs every 2 master cycles for fast IPL transfer
-        // TODO: revert to 24 for accurate timing once performance is acceptable
-        if (apuCounter >= 2) {
-            apuCounter = 0;
-            apu.step();
-        }
-        
-        // Generate audio more frequently (every ~341 CPU cycles = ~32kHz sampling rate)
-        // At 21.477272 MHz master clock, 32kHz = ~671 cycles per sample
-        // Generate audio every ~671 cycles to maintain 32kHz
-        static int audioCounter = 0;
-        audioCounter++;
-        if (audioCounter >= 671) {
-            apu.generateAudio();
-            audioCounter = 0;
-        }
-        
-        if(ppu.isFrameReady()){
-            
+
+        // Run one full frame: 262 scanlines × 341 dots = 89342 master cycles
+        static int ppuCounter = 0;
+        static int cpuCounter = 0;
+        static int apuCounter = 0;
+        static int lastScanline = -1;
+
+        for (int mc = 0; mc < 89342 && running; mc++) {
+            ppuCounter++;
+            cpuCounter++;
+            apuCounter++;
+
+            if (ppuCounter >= 4) {
+                ppuCounter = 0;
+                ppu.step();
+
+                // Auto-Joypad at VBlank
+                if (lastScanline != 225 && ppu.getScanline() == 225) {
+                    memory.performAutoJoypadRead();
+                }
+                lastScanline = ppu.getScanline();
+            }
+
+            if (cpuCounter >= 6) {
+                cpuCounter = 0;
+                // Skip CPU during DMA (CPU is halted while DMA runs)
+                if (memory.m_dmaCyclesPending > 0) {
+                    memory.m_dmaCyclesPending -= 6;
+                } else {
+                    cpu.step();
+                    if (cpu.m_quitEmulation) { running = false; break; }
+                }
+                cycleCount++;
+            }
+
+            if (apuCounter >= 2) {
+                apuCounter = 0;
+                apu.step();
+            }
+        } // end frame loop
+
+        // Render frame if ready
+        if (ppu.isFrameReady()) {
             ppu.renderFrame();
             ppu.clearFrameReady();
-
             frameCount++;
-            
-            if (frameCount % 60 == 0) {
-                std::cout << "Frame: " << frameCount << ", CPU Cycles: " << cpu.getCycles() << std::endl;
+
+            // Auto-test: simulate input after initialization
+            if (frameCount == 15) {
+                std::cout << "[AUTO] Frame " << frameCount << ": pressing DOWN" << std::endl;
+                input.setButton(SimpleInput::BIT_DOWN, true);
+            } else if (frameCount == 16) {
+                input.setButton(SimpleInput::BIT_DOWN, false);
+            } else if (frameCount == 18) {
+                std::cout << "[AUTO] Frame " << frameCount << ": pressing START" << std::endl;
+                input.setButton(SimpleInput::BIT_START, true);
+            } else if (frameCount == 19) {
+                input.setButton(SimpleInput::BIT_START, false);
             }
         }
-        
+
     }
     
     std::cout << "Emulation finished." << std::endl;

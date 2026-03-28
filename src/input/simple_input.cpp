@@ -49,21 +49,11 @@ void SimpleInput::handleEvent(const SDL_Event& event) {
 }
 
 void SimpleInput::updateKeyboardState() {
-    const Uint8* keyboardState = SDL_GetKeyboardState(nullptr);
-    
-    // Update button states based on current keyboard state
-    setButton(BIT_UP, keyboardState[SDL_SCANCODE_UP] != 0);
-    setButton(BIT_DOWN, keyboardState[SDL_SCANCODE_DOWN] != 0);
-    setButton(BIT_LEFT, keyboardState[SDL_SCANCODE_LEFT] != 0);
-    setButton(BIT_RIGHT, keyboardState[SDL_SCANCODE_RIGHT] != 0);
-    setButton(BIT_B, keyboardState[SDL_SCANCODE_Z] != 0);
-    setButton(BIT_A, keyboardState[SDL_SCANCODE_X] != 0);
-    setButton(BIT_Y, keyboardState[SDL_SCANCODE_A] != 0);
-    setButton(BIT_X, keyboardState[SDL_SCANCODE_S] != 0);
-    setButton(BIT_L, keyboardState[SDL_SCANCODE_D] != 0);
-    setButton(BIT_R, keyboardState[SDL_SCANCODE_F] != 0);
-    setButton(BIT_SELECT, keyboardState[SDL_SCANCODE_Q] != 0);
-    setButton(BIT_START, keyboardState[SDL_SCANCODE_E] != 0);
+    // Input state is managed via handleEvent() only.
+    // SDL_GetKeyboardState is not used because emulation is slow
+    // and key state may change between events and VBlank reads.
+    // handleEvent + setButton provides latched input that persists
+    // until the next key-up event.
 }
 
 void SimpleInput::writeStrobe(uint8_t value) {

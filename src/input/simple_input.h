@@ -14,14 +14,7 @@ public:
     uint8_t readController2();
     
 
-private:
-    uint16_t m_controller1_state;
-    uint16_t m_controller2_state;
-    bool m_strobe_active;
-    uint8_t m_read_index1;
-    uint8_t m_read_index2;
-    
-    // SNES button bit positions
+    // SNES button bit positions (public for auto-test access)
     enum ButtonBit {
         BIT_B = 0,
         BIT_Y = 1,
@@ -37,6 +30,13 @@ private:
         BIT_R = 11
     };
     
-    void updateKeyboardState();
     void setButton(ButtonBit bit, bool pressed);
+
+private:
+    uint16_t m_controller1_state;
+    uint16_t m_controller2_state;
+    bool m_strobe_active;
+    uint8_t m_read_index1;
+    uint8_t m_read_index2;
+    void updateKeyboardState();
 };

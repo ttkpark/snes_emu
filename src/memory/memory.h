@@ -27,6 +27,7 @@ public:
     
     // DMA operations
     void performDMA(uint8_t channel);
+    int32_t m_dmaCyclesPending = 0; // Master cycles consumed by DMA
     
     // Auto-Joypad operations
     void performAutoJoypadRead();
