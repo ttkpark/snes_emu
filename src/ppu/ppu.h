@@ -42,11 +42,12 @@ public:
     // PPU register writes (called by Memory when CPU writes to $2100-$21FF)
     void writeRegister(uint16_t address, uint8_t value);
     uint8_t readRegister(uint16_t address);
+    uint8_t readRegisterImpl(uint16_t address);
     
     // VRAM, CGRAM, OAM access
     void writeVRAM(uint16_t address, uint8_t value);
     uint8_t readVRAM(uint16_t address);
-    void writeCGRAM(uint8_t address, uint8_t value);
+    void writeCGRAM(uint16_t address, uint8_t value);
     void writeOAM(uint16_t address, uint8_t value);
 
     void invalidateTileCache(uint16_t address);
@@ -60,18 +61,34 @@ public:
     
     // Background rendering functions
     uint32_t renderBackgroundMode1(int x);
+    uint32_t renderBackgroundMode2(int x);
+    uint32_t renderBackgroundMode3(int x);
+    uint32_t renderBackgroundMode4(int x);
+    uint32_t renderBackgroundMode5(int x);
     uint32_t renderBackgroundMode6(int x);
+    uint32_t renderBackgroundMode7(int x);
     uint32_t renderTestPattern(int x);
     
     bool isFrameReady() const { return m_frameReady; }
     void clearFrameReady() { m_frameReady = false; }
     
     int getScanline() const { return m_scanline; }
+    int getDot() const { return m_dot; }
     bool isNMIEnabled() const { return m_nmiEnabled; }
     bool isForcedBlank() const { return m_forcedBlank; }
     uint8_t getBrightness() const { return m_brightness; }
+    uint16_t getVRAMAddress() const { return m_vramAddress; }  // Diagnostic: current VRAM word address
+    uint16_t getOAMAddress() const { return m_oamAddress; }  // Diagnostic: current OAM byte address
+    int getFrameCount() const;  // Diagnostic: current frame count
+    // Returns VBlank start scanline based on $2133 OVERSCAN bit:
+    // bit2=0 → 225 (NTSC standard), bit2=1 → 240 (OVERSCAN/PAL-like)
+    int getVBlankStart() const { return (m_setini & 0x04) ? 240 : 225; }
     // Diagnostic: recent reads of RDNMI ($4210)
     const char* getRDNMIHistoryString();
+
+    // Hardware latch trigger: called by auto-joypad process at VBlank start.
+    // On real SNES the /LATCH pin fires during auto-joypad, setting bit7 of $213F.
+    void triggerHVLatch();
     
     // Screen dimensions
     static const int SCREEN_WIDTH = 256;
@@ -86,8 +103,19 @@ private:
     uint8_t m_brightness;
     uint8_t m_bgMode;
     bool m_forcedBlank;
-    bool m_nmiEnabled;      // NMITIMEN register (0x4200)
-    bool m_nmiFlag;         // RDNMI register (0x4210)
+    bool m_nmiEnabled;              // NMITIMEN register (0x4200)
+    bool m_nmiFlag;                 // RDNMI register (0x4210)
+    bool m_nmiAlreadyFiredThisVBlank; // Prevents double-NMI: edge-detection guard
+    bool m_timeOver;        // STAT77 bit7: >32 OBJ on a scanline this frame
+    bool m_rangeOver;       // STAT77 bit6: >256 OBJ pixels on a scanline this frame
+    bool m_fieldBit;        // STAT78 bit6: interlace field (toggles each frame when $2133 bit0 set)
+
+    // H/V Timer IRQ ($4200 bits 5-4, $4207-$420A, $4211)
+    uint8_t m_irqMode;      // 0=off, 1=H-IRQ, 2=V-IRQ, 3=H+V-IRQ
+    uint16_t m_htimer;      // H-IRQ position (0-339, $4207-$4208)
+    uint16_t m_vtimer;      // V-IRQ position (0-261, $4209-$420A)
+    bool m_irqFlag;         // TIMEUP: IRQ pending flag ($4211 bit7, clears on read)
+    bool m_irqFiredThisDot; // Prevents re-firing on same dot
     
     // H/V Counter latch
     uint16_t m_latchedH;   // Latched horizontal counter (dot position)
@@ -120,9 +148,9 @@ private:
     // 0=32x32, 1=64x32, 2=32x64, 3=64x64
     uint8_t m_bgMapSize[4];  // Tilemap size for BG1-4
     
-    // BG tile size settings (from BGMODE register, bits 3-6)
+    // BG tile size settings (from BGMODE register, bits 4-7)
     // 0 = 8x8 tiles, 1 = 16x16 tiles
-    bool m_bgTileSize[4];  // Tile size for BG1-4 (BG1=bit5, BG2=bit6, BG3=bit3, BG4=bit4)
+    bool m_bgTileSize[4];  // Tile size for BG1-4 (BG1=bit4, BG2=bit5, BG3=bit6, BG4=bit7)
     
     // Mosaic settings
     uint8_t m_mosaicSize;      // Mosaic size (bits 0-3 of $2106)
@@ -142,11 +170,10 @@ private:
     uint16_t m_bg4ScrollX;
     uint16_t m_bg4ScrollY;
     
-    // Scroll write latches (for 16-bit writes)
-    bool m_scrollLatchX;
-    uint8_t m_scrollPrevX;
-    bool m_scrollLatchY;
-    uint8_t m_scrollPrevY;
+    // Scroll write latch: single shared ppu1_mdr per bsnes/ares
+    // (all BGnHOFS/VOFS writes share one latch; Mode 7 scroll has a separate latch)
+    uint8_t m_scrollPrevX;   // shared BG scroll latch (ppu1_mdr equivalent)
+    uint8_t m_scrollPrevY;   // kept separate for compatibility (real HW uses single latch)
     
     // Main/Sub screen designation ($212C-$212E)
     uint8_t m_mainScreenDesignation;
@@ -167,16 +194,28 @@ private:
     // Color Math settings
     uint8_t m_cgws;        // Color Math control ($2130)
     uint8_t m_cgadsub;     // Color Math settings ($2131)
+    uint8_t m_coldata;     // Fixed Color Data ($2132): R/G/B 5-bit values packed
+    uint8_t m_coldataR;    // Fixed color red component (5-bit)
+    uint8_t m_coldataG;    // Fixed color green component (5-bit)
+    uint8_t m_coldataB;    // Fixed color blue component (5-bit)
     uint8_t m_setini;      // Screen Mode/Video Select ($2133)
+
+    // Mode 7 scroll latch (shared write latch for $210D/$210E in Mode 7)
+    uint8_t m_m7hofs_prev; // Previous write latch for $210D (M7HOFS)
+    uint8_t m_m7vofs_prev; // Previous write latch for $210E (M7VOFS)
+    int16_t m_m7hofs;      // Mode 7 horizontal scroll offset (13-bit signed)
+    int16_t m_m7vofs;      // Mode 7 vertical scroll offset (13-bit signed)
     
     // Mode 7 registers
     uint8_t m_m7sel;       // $211A
-    int16_t m_m7a;         // $211B/$211B (signed 16-bit)
-    int16_t m_m7b;         // $211C/$211C
-    int16_t m_m7c;         // $211D/$211D
-    int16_t m_m7d;         // $211E/$211E
-    int16_t m_m7x;         // $211F/$211F (center X)
-    int16_t m_m7y;         // $2120/$2120 (center Y)
+    int16_t m_m7a;         // $211B (signed 16-bit, 8.8 fixed point)
+    int16_t m_m7b;         // $211C
+    int16_t m_m7c;         // $211D
+    int16_t m_m7d;         // $211E
+    int16_t m_m7x;         // $211F center X (13-bit signed)
+    int16_t m_m7y;         // $2120 center Y (13-bit signed)
+    // Shared write latch for Mode 7 matrix/center registers
+    uint8_t m_m7Latch;     // Last byte written to any M7 register (single shared latch)
     // Latches for Mode 7 16-bit writes
     bool m_m7aLatch, m_m7bLatch, m_m7cLatch, m_m7dLatch, m_m7xLatch, m_m7yLatch;
     uint8_t m_m7aPrev, m_m7bPrev, m_m7cPrev, m_m7dPrev, m_m7xPrev, m_m7yPrev;
@@ -187,20 +226,24 @@ private:
     // VRAM (Video RAM) - 64KB for tiles and tilemaps
     std::vector<uint8_t> m_vram;
     uint16_t m_vramAddress;
-    uint8_t m_vramIncrement;  // Increment size: 0=1, 1=32, 2=128
-    uint8_t m_vramMapping;    // Address mapping mode (bits 2-3 of $2115)
-    uint8_t m_vramReadBuffer; // VRAM read buffer
+    uint8_t m_vramIncrement;    // Increment size: 0=1, 1=32, 2=128
+    uint8_t m_vramMapping;      // Address mapping mode (bits 2-3 of $2115)
+    uint8_t m_vramReadBuffer;    // VRAM prefetch low byte
+    uint8_t m_vramReadBufferH;   // VRAM prefetch high byte
+    bool m_vramIncrAfterHigh;   // VMAIN bit7: true=increment after $2119, false=after $2118
     std::vector<TileCache> m_tileCache2bpp;
     std::vector<TileCache> m_tileCache4bpp;
     std::vector<TileCache> m_tileCache8bpp;
     
     // CGRAM (Color Generator RAM) - 512 bytes for palettes
     std::vector<uint8_t> m_cgram;
-    uint8_t m_cgramAddress;
+    uint16_t m_cgramAddress;  // byte address (0-511); $2121 sets colorIndex*2
     
     // OAM (Object Attribute Memory) - 544 bytes for sprites
     std::vector<uint8_t> m_oam;
     uint16_t m_oamAddress;
+    uint8_t  m_oamLatchByte;  // Write-twice latch for low OAM table (even-byte buffer)
+    bool     m_oamLatchValid; // True when latch holds a buffered byte
     
     // Framebuffer - rendered output
     uint32_t* m_framebuffer;
@@ -236,6 +279,10 @@ private:
     
     // BG layer rendering (unified function)
     PixelInfo renderBGx(int bgIndex, int tileX, int tileY, int pixelX, int pixelY, int bpp = 2);
+
+    // Internal helper: apply scroll, compute tile coords, call renderBGx
+    PixelInfo sampleBGLayer(int bgIndex, int screenX, int screenY,
+                             int scrollX, int scrollY, int bpp, bool is16x16);
     
     // Window functions
     bool isWindowEnabled(int x, int bgIndex, bool isSprite);
@@ -248,6 +295,7 @@ private:
     // Helper functions
     uint16_t getVRAMIncrementSize() const;
     void incrementVRAMAddress();
+    uint16_t applyVRAMMapping(uint16_t wordAddr) const;
     
     // Debug functions
     void dumpVRAM(const std::string& filename = "vram_dump.bin");

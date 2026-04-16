@@ -11,6 +11,15 @@
 #include <SDL.h>
 #endif
 
+// Forward declaration of static OPT helper (defined later in this file)
+static void getOPTOffsets(const std::vector<uint8_t>& vram,
+                           uint16_t bg3MapAddr, uint8_t bg3MapSize,
+                           int screenX, int screenY, int bgTileSize,
+                           int& outOffsetX, int& outOffsetY);
+
+// Forward declaration of static backdrop helper
+static uint32_t getBGColorFromCGRAM(const std::vector<uint8_t>& cgram);
+
 PPU::PPU() 
     : m_cpu(nullptr)
     , m_brightness(15)
@@ -18,6 +27,15 @@ PPU::PPU()
     , m_forcedBlank(false)
     , m_nmiEnabled(false)
     , m_nmiFlag(false)
+    , m_nmiAlreadyFiredThisVBlank(false)
+    , m_timeOver(false)
+    , m_rangeOver(false)
+    , m_fieldBit(false)
+    , m_irqMode(0)
+    , m_htimer(0x01FF)
+    , m_vtimer(0x01FF)
+    , m_irqFlag(false)
+    , m_irqFiredThisDot(false)
     , m_latchedH(0)
     , m_latchedV(0)
     , m_hvLatchRead(false)
@@ -39,9 +57,9 @@ PPU::PPU()
     , m_bg3ScrollY(0)
     , m_bg4ScrollX(0)
     , m_bg4ScrollY(0)
-    , m_scrollLatchX(false)
+
     , m_scrollPrevX(0)
-    , m_scrollLatchY(false)
+
     , m_scrollPrevY(0)
     , m_mainScreenDesignation(0)
     , m_subScreenDesignation(0)
@@ -59,14 +77,23 @@ PPU::PPU()
     , m_tsw(0)
     , m_cgws(0)
     , m_cgadsub(0)
+    , m_coldata(0)
+    , m_coldataR(0)
+    , m_coldataG(0)
+    , m_coldataB(0)
     , m_setini(0)
+    , m_m7hofs_prev(0)
+    , m_m7vofs_prev(0)
+    , m_m7hofs(0)
+    , m_m7vofs(0)
     , m_m7sel(0)
-    , m_m7a(0)
+    , m_m7a(0x0100)  // Identity matrix: A=1.0, D=1.0
     , m_m7b(0)
     , m_m7c(0)
-    , m_m7d(0)
+    , m_m7d(0x0100)
     , m_m7x(0)
     , m_m7y(0)
+    , m_m7Latch(0)
     , m_m7aLatch(false), m_m7bLatch(false), m_m7cLatch(false), m_m7dLatch(false), m_m7xLatch(false), m_m7yLatch(false)
     , m_m7aPrev(0), m_m7bPrev(0), m_m7cPrev(0), m_m7dPrev(0), m_m7xPrev(0), m_m7yPrev(0)
     , m_objSize(0)
@@ -74,8 +101,12 @@ PPU::PPU()
     , m_vramIncrement(0)
     , m_vramMapping(0)
     , m_vramReadBuffer(0)
+    , m_vramReadBufferH(0)
+    , m_vramIncrAfterHigh(false)
     , m_cgramAddress(0)
     , m_oamAddress(0)
+    , m_oamLatchByte(0)
+    , m_oamLatchValid(false)
     , m_scanline(0)
     , m_dot(0)
     , m_frameReady(false)
@@ -90,6 +121,10 @@ PPU::PPU()
     m_vram.resize(64 * 1024, 0);
     m_cgram.resize(512, 0);
     m_oam.resize(544, 0);
+    // Initialize all 128 sprites as off-screen (Y=0xEC=236 puts sprite below visible area)
+    for (int i = 0; i < 128; i++) {
+        m_oam[i * 4 + 1] = 0xEC;  // Y position byte
+    }
     m_framebuffer = new uint32_t[SCREEN_WIDTH * SCREEN_HEIGHT];
     m_tileCache2bpp.resize(m_vram.size() / 16);
     m_tileCache4bpp.resize(m_vram.size() / 32);
@@ -125,15 +160,16 @@ PPU::PPU()
     m_mosaicEnabled[3] = false; // BG4
     
     // Initialize BG priority (Mode 0 defaults)
-    // Mode 0: BG1=3/0, BG2=2/0, BG3=1/0, BG4=0/0 (high priority / low priority)
-    m_bgPriority[0][0] = 0;  // BG1 low priority
-    m_bgPriority[0][1] = 3;  // BG1 high priority
-    m_bgPriority[1][0] = 0;  // BG2 low priority  
-    m_bgPriority[1][1] = 2;  // BG2 high priority
-    m_bgPriority[2][0] = 0;  // BG3 low priority
-    m_bgPriority[2][1] = 1;  // BG3 high priority
-    m_bgPriority[3][0] = 0;  // BG4 low priority
-    m_bgPriority[3][1] = 0;  // BG4 high priority
+    // Mode 0 composite priority order (higher = drawn on top):
+    // SP3=15 > BG1hi=13 > BG2hi=12 > SP2=11 > BG1lo=9 > BG2lo=8 > SP1=7 > BG3hi=5 > BG4hi=4 > SP0=3 > BG3lo=2 > BG4lo=1 > BD=0
+    m_bgPriority[0][0] = 9;   // BG1 low priority
+    m_bgPriority[0][1] = 13;  // BG1 high priority
+    m_bgPriority[1][0] = 8;   // BG2 low priority
+    m_bgPriority[1][1] = 12;  // BG2 high priority
+    m_bgPriority[2][0] = 2;   // BG3 low priority
+    m_bgPriority[2][1] = 5;   // BG3 high priority
+    m_bgPriority[3][0] = 1;   // BG4 low priority
+    m_bgPriority[3][1] = 4;   // BG4 high priority
     
     // Set initial background color in CGRAM to black (0x0000)
     m_cgram[0] = 0x00;
@@ -170,7 +206,9 @@ bool PPU::initVideo() {
     }
     
     // Create texture for SNES framebuffer
-    m_texture = SDL_CreateTexture(m_renderer, SDL_PIXELFORMAT_RGBA8888,
+    // Our framebuffer stores pixels as (A<<24)|(B<<16)|(G<<8)|R in the uint32
+    // = bytes [R, G, B, A] in memory (little-endian) = SDL_PIXELFORMAT_ABGR8888
+    m_texture = SDL_CreateTexture(m_renderer, SDL_PIXELFORMAT_ABGR8888,
                                   SDL_TEXTUREACCESS_STREAMING,
                                   SCREEN_WIDTH, SCREEN_HEIGHT);
     if (!m_texture) {
@@ -184,8 +222,8 @@ bool PPU::initVideo() {
     for (int y = 0; y < SCREEN_HEIGHT; y++) {
         for (int x = 0; x < SCREEN_WIDTH; x++) {
             int index = y * SCREEN_WIDTH + x;
-            // Initialize to black (0x000000FF = opaque black in 0xRRGGBBAA format)
-            m_framebuffer[index] = 0x000000FF; // Black (0xRRGGBBAA format)
+            // Initialize to black (RGBA8888 byte order: on little-endian, uint32 = 0xAABBGGRR)
+            m_framebuffer[index] = 0xFF000000; // Black (opaque)
         }
     }
 
@@ -194,6 +232,8 @@ bool PPU::initVideo() {
     return true;
 }
 int frameCount = 0;
+
+int PPU::getFrameCount() const { return frameCount; }
 
 void PPU::renderFrame() {
     #ifdef USE_SDL
@@ -247,36 +287,66 @@ void PPU::cleanup() {
 }
 
 void PPU::step() {
-    // Log PPU events
-    static int frameCount = 0;
+    // frameCount is declared globally above renderFrame() - do not shadow it
     static int logCount = 0;
-    static int stepCount = 0;
     static bool warnedTiming = false;
     if (!warnedTiming) {
         std::cout << "[WARN] PPU timing is simplified (341 dots/scanline, 262 lines). Precise NTSC/PAL timing, H/V-blank DMA windows, and mid-scanline effects are not emulated yet." << std::endl;
         warnedTiming = true;
     }
-    
+
     // Increment dot counter (341 dots per scanline)
     m_dot++;
-    
+    m_irqFiredThisDot = false;
+
+    // H/V Timer IRQ check
+    // Note: m_irqFlag persists until $4211 is read, but hardware re-fires the IRQ
+    // line on each matching scanline/dot regardless.  We allow re-triggering per
+    // scanline by checking !m_irqFiredThisDot to avoid double-firing within one dot.
+    if (m_irqMode != 0 && !m_irqFiredThisDot) {
+        bool hMatch = (m_dot == (int)m_htimer);
+        bool vMatch = (m_scanline == (int)m_vtimer);
+        bool fire = false;
+        if (m_irqMode == 1 && hMatch)                fire = true; // H-IRQ: every scanline at htimer dot
+        else if (m_irqMode == 2 && vMatch && m_dot == 0) fire = true; // V-IRQ: specified scanline, dot=0
+        else if (m_irqMode == 3 && hMatch && vMatch)      fire = true; // H+V-IRQ: both match
+        if (fire) {
+            m_irqFlag = true;
+            m_irqFiredThisDot = true;
+            if (m_cpu) m_cpu->triggerIRQ();
+        }
+    }
+
     if (m_dot >= 341) {
         m_dot = 0;
-        
+
         // Render scanline when it completes
         if (m_scanline < SCREEN_HEIGHT) {
             renderScanline();
         }
-        
+
         m_scanline++;
-    
-    // V-Blank start at scanline 225 (0xE1)
-    if (m_scanline == 225) {
-        m_nmiFlag = true;  // Set NMI flag when VBlank starts
-        
-        
-        if ((m_nmiEnabled) && m_cpu) {
-            m_cpu->triggerNMI();
+
+    // V-Blank start: scanline 225 normally, 240 when $2133 bit2 (OVERSCAN) is set
+    {
+        int vblankStart = getVBlankStart();
+        if (m_scanline == vblankStart) {
+            m_nmiFlag = true;  // Set NMI flag when VBlank starts
+            m_nmiAlreadyFiredThisVBlank = false;  // Reset per-VBlank guard
+            static int vblankNmiCount = 0;
+            if (vblankNmiCount < 20) {
+                fprintf(stderr, "[VBLANK-NMI] F:%d scan=%d nmiEnabled=%d\n",
+                    frameCount, m_scanline, m_nmiEnabled);
+                vblankNmiCount++;
+            }
+            // Toggle interlace field bit each frame when $2133 bit0 (INTERLACE) is set
+            if (m_setini & 0x01) {
+                m_fieldBit = !m_fieldBit;
+            }
+            if ((m_nmiEnabled) && m_cpu) {
+                m_cpu->triggerNMI();
+                m_nmiAlreadyFiredThisVBlank = true;
+            }
         }
     }
     
@@ -292,6 +362,9 @@ void PPU::step() {
         m_dot = 0;
         m_frameReady = true;
         m_nmiFlag = false;  // Clear NMI flag at frame start (VBlank ends)
+        m_nmiAlreadyFiredThisVBlank = false;  // Reset for new frame
+        m_timeOver  = false; // Clear sprite overflow flags each frame
+        m_rangeOver = false;
         frameCount++;
         
         // Dump VRAM after frame 15 (after NMI fills VRAM with data)
@@ -301,6 +374,58 @@ void PPU::step() {
             dumpCGRAM("cgram_dump.txt");
             vramDumped = true;
             std::cout << "PPU: VRAM and CGRAM dumps completed after frame " << frameCount << std::endl;
+        }
+        // Dump VRAM at multiple Character Test frames to see when tilemap content appears
+        if (frameCount == 675 || frameCount == 685 || frameCount == 700 || frameCount == 750) {
+            char fname[64];
+            snprintf(fname, sizeof(fname), "vram_f%d.txt", frameCount);
+            dumpVRAMHex(fname);
+        }
+        // Dump CGRAM and VRAM at start of Character Test (frame 685) for BG4 palette analysis
+        if (frameCount == 685) {
+            dumpCGRAM("cgram_chartest.txt");
+            fprintf(stderr, "[CGRAM685] BG4pal(192-207):");
+            for (int i = 192; i < 208; i++) fprintf(stderr, " %02X", m_cgram[i]);
+            fprintf(stderr, "\n[CGRAM685] SPRpal0(256-271):");
+            for (int i = 256; i < 272; i++) fprintf(stderr, " %02X", m_cgram[i]);
+            fprintf(stderr, "\n[CGRAM685] BG1pal0(0-15):");
+            for (int i = 0; i < 16; i++) fprintf(stderr, " %02X", m_cgram[i]);
+            fprintf(stderr, "\n[CGRAM685] BG1pal6(48-63):");
+            for (int i = 48; i < 64; i++) fprintf(stderr, " %02X", m_cgram[i]);
+            fprintf(stderr, "\n");
+            // Dump BG4 tilemap: m_bgMapAddr[3] is a BYTE offset into m_vram
+            {
+                uint32_t base = m_bgMapAddr[3]; // byte address
+                fprintf(stderr, "[VRAM685] BG4tilemap@byte0x%04X (first 64 entries):\n", base);
+                for (int row = 0; row < 4; row++) {
+                    fprintf(stderr, "  +%03X:", row*32);
+                    for (int col = 0; col < 16; col++) {
+                        uint32_t off = base + (row*16 + col)*2;
+                        uint8_t lo = (off < m_vram.size()) ? m_vram[off] : 0xEE;
+                        uint8_t hi = (off+1 < m_vram.size()) ? m_vram[off+1] : 0xEE;
+                        fprintf(stderr, " %02X%02X", hi, lo);
+                    }
+                    fprintf(stderr, "\n");
+                }
+            }
+            // Dump BG1 tilemap: m_bgMapAddr[0] is a BYTE offset into m_vram
+            {
+                uint32_t base = m_bgMapAddr[0];
+                fprintf(stderr, "[VRAM685] BG1tilemap@byte0x%04X (first 32 entries):\n", base);
+                for (int row = 0; row < 2; row++) {
+                    fprintf(stderr, "  +%03X:", row*32);
+                    for (int col = 0; col < 16; col++) {
+                        uint32_t off = base + (row*16 + col)*2;
+                        uint8_t lo = (off < m_vram.size()) ? m_vram[off] : 0xEE;
+                        uint8_t hi = (off+1 < m_vram.size()) ? m_vram[off+1] : 0xEE;
+                        fprintf(stderr, " %02X%02X", hi, lo);
+                    }
+                    fprintf(stderr, "\n");
+                }
+                // Also log BG1 tile data address
+                fprintf(stderr, "[VRAM685] BG1tiledata@byte0x%04X BG4tiledata@byte0x%04X\n",
+                    m_bgTileAddr[0], m_bgTileAddr[3]);
+            }
         }
         // Log BG register state once after NMI starts
         static bool bgRegsDumped = false;
@@ -333,6 +458,33 @@ void PPU::step() {
 }
 
 void PPU::renderScanline() {
+    // Diagnostic: dump PPU state at key frames
+    // Color Test window diagnostic
+    if (m_scanline == 0 && (frameCount == 1850 || frameCount == 1900 || frameCount == 1950 || frameCount == 2000)) {
+        fprintf(stderr, "[COLORTEST] F:%d TM=%02X TS=%02X Mode=%d W12=%02X W34=%02X WOBJ=%02X WH=(%d-%d,%d-%d) TMW=%02X TSW=%02X CGWS=%02X CGAD=%02X FIX=(%d,%d,%d) SETINI=%02X\n",
+            frameCount, m_mainScreenDesignation, m_subScreenDesignation, m_bgMode,
+            m_w12sel, m_w34sel, m_wobjsel,
+            (int)m_wh0, (int)m_wh1, (int)m_wh2, (int)m_wh3,
+            m_tmw, m_tsw, m_cgws, m_cgadsub,
+            (int)m_coldataR, (int)m_coldataG, (int)m_coldataB, m_setini);
+    }
+    if (m_scanline == 0 && (frameCount == 80 || frameCount == 685 || frameCount == 700)) {
+        // OAM first 2 sprites
+        uint8_t oam0_x = m_oam[0], oam0_y = m_oam[1], oam0_t = m_oam[2], oam0_a = m_oam[3];
+        // BG4 address: m_bgMapAddr[3]
+        // CGRAM sprite palettes start at byte 256; log 8 bytes (first 4 colors of spr pal 0)
+        uint8_t c256 = m_cgram[256], c257 = m_cgram[257], c258 = m_cgram[258], c259 = m_cgram[259];
+        uint8_t c260 = m_cgram[260], c261 = m_cgram[261], c262 = m_cgram[262], c263 = m_cgram[263];
+        // BG scrolls + tile addresses for comparison
+        fprintf(stderr, "[DIAG3] F:%d TM=%02X Mode=%d BG1map=%04X BG1tile=%04X BG2map=%04X BG2tile=%04X BG1scrl=(%d,%d) BG4scrl=(%d,%d) OBJsz=%02X OAM0=(%02X,%02X,t%02X,a%02X)\n",
+            frameCount, m_mainScreenDesignation, m_bgMode,
+            m_bgMapAddr[0], m_bgTileAddr[0],
+            m_bgMapAddr[1], m_bgTileAddr[1],
+            (int)m_bg1ScrollX, (int)m_bg1ScrollY,
+            (int)m_bg4ScrollX, (int)m_bg4ScrollY,
+            m_objSize,
+            oam0_x, oam0_y, oam0_t, oam0_a);
+    }
 #ifdef DEBUG_PPU_RENDER
     // Debug: Print when this is called
     static int callCount = 0;
@@ -348,98 +500,399 @@ void PPU::renderScanline() {
     }
     // Check if forced blank is enabled
     if (m_forcedBlank) {
-        // During forced blank, keep previous frame data instead of filling with black
-        // This prevents flickering when CPU is slow
+        // SNES hardware: forced blank outputs black (transparent backdrop).
+        // Previous code kept stale frame data, which prevented scene transitions
+        // from being visible (e.g., test ROM TC-02..TC-11 never appeared).
+        int y = m_scanline;
+        if (y >= 0 && y < SCREEN_HEIGHT) {
+            for (int x = 0; x < SCREEN_WIDTH; x++) {
+                m_framebuffer[y * SCREEN_WIDTH + x] = 0xFF000000; // opaque black
+            }
+        }
         return;
     }
-    
+
     // Render actual SNES graphics
-    
+    // SNES priority order (highest to lowest):
+    // Sprite priority 3, BG1.high, BG2.high, Sprite priority 2,
+    // BG1.low, BG2.low, Sprite priority 1, BG3.high, BG4.high,
+    // Sprite priority 0, BG3.low, BG4.low, backdrop (CGRAM[0])
+
+    int y = m_scanline;
+
+    // ---- STAT77 sprite overflow pre-scan ----
+    // Count sprites on this scanline and their pixel widths for Time/Range Over flags
+    {
+        uint8_t sizeMode = (m_objSize >> 5) & 0x07;
+        if (sizeMode > 5) sizeMode = 0;
+        static const int smallW[6] = {8,8,8,16,16,32};
+        static const int smallH[6] = {8,8,8,16,16,32};
+        static const int largeW[6] = {16,32,64,32,64,64};
+        static const int largeH[6] = {16,32,64,32,64,64};
+        int sprOnLine = 0, sprPixels = 0;
+        for (int s = 0; s < 128; s++) {
+            int base = s * 4;
+            if (base + 3 >= (int)m_oam.size()) break;
+            uint8_t spY = m_oam[base + 1];
+            int extIdx = 0x200 + s / 4;
+            uint8_t extBits = (extIdx < (int)m_oam.size()) ? (m_oam[extIdx] >> ((s%4)*2)) & 0x03 : 0;
+            bool xBit8 = (extBits & 0x01) != 0;
+            // SNES hardware: sprites with X bit8=1 (X >= 256, entirely off-screen right)
+            // are excluded from sprite evaluation (not counted for Time Over or Range Over)
+            if (xBit8) continue;
+            bool largeSprite = (extBits & 0x02) != 0;
+            int sw = largeSprite ? largeW[sizeMode] : smallW[sizeMode];
+            int sh = largeSprite ? largeH[sizeMode] : smallH[sizeMode];
+            // Correct SNES sprite Y formula: lineOffset = (scanline - spriteY) & 0xFF
+            // Sprite is on this scanline if lineOffset < height
+            int lineOffset = (y - (int)spY) & 0xFF;
+            if (lineOffset < sh) {
+                sprOnLine++;
+                sprPixels += sw;
+            }
+        }
+        // Range Over (bit6): >32 sprites found on this scanline
+        if (sprOnLine > 32) m_rangeOver = true;
+        // Time Over (bit7): sprite pixel count exceeds rendering budget (>272 pixels)
+        if (sprPixels > 272) m_timeOver = true;
+        // Diagnostic: log when overflow newly detected during sprite test frames
+        if ((sprOnLine > 32 || sprPixels > 272) && frameCount >= 500 && frameCount <= 700) {
+            // Find which sprites caused the overflow
+            static int diagOvfCount2 = 0;
+            if (diagOvfCount2 < 5) {
+                diagOvfCount2++;
+                fprintf(stderr, "[OVF2] F:%d SL:%d sprOnLine=%d sprPixels=%d sizeMode=%d\n",
+                    frameCount, y, sprOnLine, sprPixels, sizeMode);
+                // Log first 5 sprites that are on this scanline
+                int logged = 0;
+                for (int s2 = 0; s2 < 128 && logged < 10; s2++) {
+                    int b2 = s2 * 4;
+                    uint8_t sy = m_oam[b2+1];
+                    int extI = 0x200 + s2/4;
+                    uint8_t eb = (extI < (int)m_oam.size()) ? (m_oam[extI] >> ((s2%4)*2)) & 0x03 : 0;
+                    bool xb8 = (eb & 0x01) != 0;
+                    bool lg = (eb & 0x02) != 0;
+                    int sw2 = lg ? largeW[sizeMode] : smallW[sizeMode];
+                    int sh2 = lg ? largeH[sizeMode] : smallH[sizeMode];
+                    int lo = (y - (int)sy) & 0xFF;
+                    if (lo < sh2 && !xb8) {
+                        fprintf(stderr, "  spr%d: Y=%d ext=%02X lo=%d sw=%d\n", s2, sy, eb, lo, sw2);
+                        logged++;
+                    }
+                }
+            }
+        }
+    }
+
+    // Pre-compute window membership for this scanline (x-loop uses these)
+    // Window 1: pixels where wh0 <= x <= wh1
+    // Window 2: pixels where wh2 <= x <= wh3
+
     for (int x = 0; x < SCREEN_WIDTH; x++) {
-        uint32_t mainColor = 0x000000FF; // Default to black (0xRRGGBBAA format)
-        uint32_t subColor = 0x000000FF;
-        
-        // Render background layers for Main Screen
-        if (m_bgMode == 0) {
-            mainColor = renderBackgroundMode0(x);
-        } else if (m_bgMode == 1) {
-            mainColor = renderBackgroundMode1(x);
-        } else if (m_bgMode == 6) {
-            mainColor = renderBackgroundMode6(x);
-        } else {
-            mainColor = renderTestPattern(x);
+        // ---- Window computation ----
+        bool inWin1 = (x >= (int)m_wh0 && x <= (int)m_wh1);
+        bool inWin2 = (x >= (int)m_wh2 && x <= (int)m_wh3);
+
+        // Per-layer window masking helper lambda
+        // wsel bits: [7:6]=win2 inv/enable [5:4]=win1 inv/enable for layer B
+        //            [3:2]=win2 inv/enable [1:0]=win1 inv/enable for layer A
+        // For a 2-layer register (e.g. W12SEL): layer A = lower nibble, layer B = upper nibble
+        // Each pair: bit1=enable, bit0=invert
+        // For OBJ/Color (WOBJSEL): obj = lower nibble, color = upper nibble
+        // Combined via WBGLOG/WOBJLOG: 2-bit logic per layer (OR/AND/XOR/XNOR)
+        // windowMaskLayer: returns true if this pixel is MASKED for the given layer.
+        // layerBit: 0=BG1, 1=BG2, 2=BG3, 3=BG4, 4=OBJ, 5=Color (for color math window)
+        // isSprite: true for OBJ layer
+        // W12SEL ($2123) bits:  [1:0]=BG1-W1 [3:2]=BG1-W2  [5:4]=BG2-W1 [7:6]=BG2-W2
+        //   Each 2-bit pair: bit1=enable, bit0=invert
+        // W34SEL ($2124) same layout for BG3/BG4
+        // WOBJSEL ($2125): [3:0]=OBJ  [7:4]=Color window
+        // WBGLOG ($212A): bits[1:0]=BG1 [3:2]=BG2 [5:4]=BG3 [7:6]=BG4 (0=OR,1=AND,2=XOR,3=XNOR)
+        // WOBJLOG ($212B): bits[1:0]=OBJ [3:2]=Color
+        auto windowMaskLayer = [&](int layerBit, bool /*isSprite*/) -> bool {
+            uint8_t wsel;
+            uint8_t wlogic;
+            int wselShift;   // bit offset within wsel for W1 pair of this layer
+            int wlogicShift; // bit offset within wlogic for 2-bit logic of this layer
+
+            switch (layerBit) {
+                case 0: wsel=m_w12sel; wselShift=0; wlogic=m_wbglog;  wlogicShift=0; break; // BG1
+                case 1: wsel=m_w12sel; wselShift=4; wlogic=m_wbglog;  wlogicShift=2; break; // BG2
+                case 2: wsel=m_w34sel; wselShift=0; wlogic=m_wbglog;  wlogicShift=4; break; // BG3
+                case 3: wsel=m_w34sel; wselShift=4; wlogic=m_wbglog;  wlogicShift=6; break; // BG4
+                case 4: wsel=m_wobjsel;wselShift=0; wlogic=m_wobjlog; wlogicShift=0; break; // OBJ
+                case 5: wsel=m_wobjsel;wselShift=4; wlogic=m_wobjlog; wlogicShift=2; break; // Color
+                default: return false;
+            }
+
+            // W1 pair: bits [wselShift+1 : wselShift]
+            bool w1en  = (wsel >> (wselShift + 1)) & 1;
+            bool w1inv = (wsel >> (wselShift + 0)) & 1;
+            // W2 pair: bits [wselShift+3 : wselShift+2]
+            bool w2en  = (wsel >> (wselShift + 3)) & 1;
+            bool w2inv = (wsel >> (wselShift + 2)) & 1;
+
+            bool w1inside = w1en && (inWin1 ^ w1inv);
+            bool w2inside = w2en && (inWin2 ^ w2inv);
+
+            uint8_t logic = (wlogic >> wlogicShift) & 0x03; // 0=OR,1=AND,2=XOR,3=XNOR
+
+            bool masked;
+            if (!w1en && !w2en) {
+                masked = false;
+            } else if (w1en && !w2en) {
+                masked = w1inside;
+            } else if (!w1en && w2en) {
+                masked = w2inside;
+            } else {
+                switch (logic) {
+                    case 0:  masked = w1inside || w2inside;   break; // OR
+                    case 1:  masked = w1inside && w2inside;   break; // AND
+                    case 2:  masked = w1inside ^  w2inside;   break; // XOR
+                    case 3:  masked = !(w1inside ^ w2inside); break; // XNOR
+                    default: masked = false; break;
+                }
+            }
+            return masked;
+        };
+
+        // ---- BG layer pixels (mode-dependent) ----
+        // We need per-layer PixelInfo for priority compositing
+        // For all modes we use sampleBGLayer / renderBGx helpers
+        PixelInfo bgLayerPixels[4] = {{0,0},{0,0},{0,0},{0,0}};
+        uint32_t backdropColor = getBGColorFromCGRAM(m_cgram);
+
+        // helper: sign-extend 10-bit scroll
+        auto signScroll = [](uint16_t v) -> int {
+            int s = v & 0x03FF;
+            if (s >= 512) s -= 1024;
+            return s;
+        };
+
+        switch (m_bgMode) {
+            case 0: {
+                bgLayerPixels[0] = sampleBGLayer(0, x, y, signScroll(m_bg1ScrollX), signScroll(m_bg1ScrollY), 2, m_bgTileSize[0]);
+                bgLayerPixels[1] = sampleBGLayer(1, x, y, signScroll(m_bg2ScrollX), signScroll(m_bg2ScrollY), 2, m_bgTileSize[1]);
+                bgLayerPixels[2] = sampleBGLayer(2, x, y, signScroll(m_bg3ScrollX), signScroll(m_bg3ScrollY), 2, m_bgTileSize[2]);
+                bgLayerPixels[3] = sampleBGLayer(3, x, y, signScroll(m_bg4ScrollX), signScroll(m_bg4ScrollY), 2, m_bgTileSize[3]);
+                break;
+            }
+            case 1: {
+                bgLayerPixels[0] = sampleBGLayer(0, x, y, signScroll(m_bg1ScrollX), signScroll(m_bg1ScrollY), 4, m_bgTileSize[0]);
+                bgLayerPixels[1] = sampleBGLayer(1, x, y, signScroll(m_bg2ScrollX), signScroll(m_bg2ScrollY), 4, m_bgTileSize[1]);
+                bgLayerPixels[2] = sampleBGLayer(2, x, y, signScroll(m_bg3ScrollX), signScroll(m_bg3ScrollY), 2, m_bgTileSize[2]);
+                break;
+            }
+            case 2: {
+                int optX=0, optY=0;
+                getOPTOffsets(m_vram, m_bgMapAddr[2], m_bgMapSize[2], x, y, m_bgTileSize[0]?16:8, optX, optY);
+                bgLayerPixels[0] = sampleBGLayer(0, x, y, signScroll(m_bg1ScrollX)+optX, signScroll(m_bg1ScrollY)+optY, 4, m_bgTileSize[0]);
+                bgLayerPixels[1] = sampleBGLayer(1, x, y, signScroll(m_bg2ScrollX)+optX, signScroll(m_bg2ScrollY)+optY, 4, m_bgTileSize[1]);
+                break;
+            }
+            case 3: {
+                bgLayerPixels[0] = sampleBGLayer(0, x, y, signScroll(m_bg1ScrollX), signScroll(m_bg1ScrollY), 8, m_bgTileSize[0]);
+                bgLayerPixels[1] = sampleBGLayer(1, x, y, signScroll(m_bg2ScrollX), signScroll(m_bg2ScrollY), 4, m_bgTileSize[1]);
+                break;
+            }
+            case 4: {
+                int optX=0, optY=0;
+                getOPTOffsets(m_vram, m_bgMapAddr[2], m_bgMapSize[2], x, y, m_bgTileSize[0]?16:8, optX, optY);
+                bgLayerPixels[0] = sampleBGLayer(0, x, y, signScroll(m_bg1ScrollX)+optX, signScroll(m_bg1ScrollY)+optY, 8, m_bgTileSize[0]);
+                bgLayerPixels[1] = sampleBGLayer(1, x, y, signScroll(m_bg2ScrollX)+optX, signScroll(m_bg2ScrollY)+optY, 2, m_bgTileSize[1]);
+                break;
+            }
+            case 5: {
+                int hiresX = x * 2;
+                bgLayerPixels[0] = sampleBGLayer(0, hiresX, y, signScroll(m_bg1ScrollX), signScroll(m_bg1ScrollY), 4, m_bgTileSize[0]);
+                bgLayerPixels[1] = sampleBGLayer(1, hiresX, y, signScroll(m_bg2ScrollX), signScroll(m_bg2ScrollY), 2, m_bgTileSize[1]);
+                break;
+            }
+            case 6: {
+                int optX=0, optY=0;
+                getOPTOffsets(m_vram, m_bgMapAddr[2], m_bgMapSize[2], x, y, 8, optX, optY);
+                int hiresX = x * 2;
+                bgLayerPixels[0] = sampleBGLayer(0, hiresX, y, signScroll(m_bg1ScrollX)+optX, signScroll(m_bg1ScrollY)+optY, 4, m_bgTileSize[0]);
+                break;
+            }
+            case 7: {
+                uint32_t c7 = renderBackgroundMode7(x);
+                bgLayerPixels[0] = {c7, (c7 == backdropColor) ? (uint8_t)0 : (uint8_t)1};
+                break;
+            }
+            default:
+                break;
         }
-        
-        // Render Sub Screen if enabled
-        if (m_subScreenDesignation != 0) {
-            subColor = renderSubScreen(x);
+
+        // ---- Sprite pixel ----
+        PixelInfo spritePixel = renderSpritePixel(x, y);
+
+        // Apply window masking to each BG layer and sprite
+        for (int i = 0; i < 4; i++) {
+            if (bgLayerPixels[i].color != 0) {
+                bool masked = false;
+                // Main screen window: TMW bit i enables windowing for that BG
+                if (m_tmw & (1 << i)) {
+                    masked = windowMaskLayer(i, false);
+                }
+                if (masked) bgLayerPixels[i] = {0, 0};
+            }
         }
-        
-        // Render sprites and composite with background
-        PixelInfo spritePixel = renderSpritePixel(x, m_scanline);
-        
-        // Composite sprites with background based on priority
-        uint32_t bgColor = mainColor;
         if (spritePixel.color != 0) {
-            // Check sprite priority against background
-            // In Mode 0, sprites have priority based on their attributes
-            // For simplicity, assume sprite priority is higher than most BGs
-            // TODO: Implement proper priority comparison based on sprite attributes
-            bool spriteBehind = false;
-            // Simple priority check: if BG has very high priority (3), sprite might be behind
-            // This is a simplified version - full implementation needs OAM extended data
-            if (mainColor != 0 && spritePixel.priority <= 1) {
-                // Check if any BG has priority >= 3
-                // For now, always show sprite if it exists and is not transparent
-                spriteBehind = false;
+            bool masked = false;
+            if (m_tmw & 0x10) { // bit4 = OBJ window mask enable
+                masked = windowMaskLayer(4, true);
             }
-            
-            if (!spriteBehind) {
-                bgColor = spritePixel.color;
+            if (masked) spritePixel = {0, 0};
+        }
+
+        // ---- SNES priority compositing ----
+        // Priority table per mode (main screen order, highest priority first):
+        // The SNES priority system: each layer has a priority bit from tilemap (0 or 1)
+        // which maps to a fixed numeric priority. Sprites have OAM priority 0-3.
+        //
+        // For simplicity we use the priority values already stored in bgLayerPixels
+        // (set by renderBGx from m_bgPriority) and sprite priority from OAM.
+        // Higher number = drawn on top.
+        //
+        // SNES composite order (priority number mapping):
+        // Mode 1: Sprite3=12, BG1hi=11, BG2hi=10, Sprite2=9, BG1lo=8, BG2lo=7,
+        //         Sprite1=6, BG3hi=5, Sprite0=4, BG3lo=3, backdrop=0
+        //   (BG3 high priority mode: BG3hi=12 if BGMODE bit3 set, but simplified here)
+        //
+        // We map BG priority groups to a 0-15 composite scale per mode.
+
+        // Composite: pick highest-priority opaque pixel
+        uint32_t mainPixel = backdropColor;
+        uint8_t mainPriority = 0;
+        bool foundAnyBG = false;
+        // Backdrop: color math bit5 of CGADSUB
+        bool colorMathApplies = (m_cgadsub & 0x20) != 0;
+
+        // Check each BG layer (enabled by TM register)
+        // BG layers are checked in order i=0 (BG1, highest) to i=3 (BG4, lowest)
+        // First non-transparent pixel found wins if same priority; higher priority always wins
+        for (int i = 0; i < 4; i++) {
+            if (!(m_mainScreenDesignation & (1 << i))) continue;
+            if (bgLayerPixels[i].color == 0) continue;
+            if (!foundAnyBG || bgLayerPixels[i].priority > mainPriority) {
+                mainPriority = bgLayerPixels[i].priority;
+                mainPixel = bgLayerPixels[i].color;
+                foundAnyBG = true;
+                // Color math applies if bit i of CGADSUB is set
+                colorMathApplies = (m_cgadsub & (1 << i)) != 0;
             }
         }
-        
-        // Apply window masking
-        // Check if this pixel should be masked by window
-        bool windowMasked = false;
-        // Window masking is complex - simplified version for now
-        // Full implementation needs to check window settings for each layer
-        
-        // Apply Color Math if enabled
-        uint32_t finalColor = bgColor;
-        if ((m_cgws & 0x20) != 0 && m_subScreenDesignation != 0) {
-            // Color Math enabled
-            finalColor = applyColorMath(bgColor, subColor);
-        } else {
-            finalColor = bgColor;
+
+        // Composite sprite on top if higher priority
+        // Sprite priority 3 > all BGs, priority 0 < most BGs
+        // Map OAM priorities 0-3 to composite scale:
+        // Mode 0: SP0=3, SP1=7, SP2=11, SP3=15
+        // Interleaved with BG priorities: BG1lo=9, BG2lo=8, BG3lo=2, BG4lo=1, BG1hi=13, BG2hi=12, BG3hi=5, BG4hi=4
+        if (spritePixel.color != 0 && (m_mainScreenDesignation & 0x10)) {
+            static const uint8_t spriteCompPriority[4] = {3, 7, 11, 15};
+            uint8_t spritePri = spriteCompPriority[spritePixel.priority & 3];
+            if (spritePri > mainPriority) {
+                mainPriority = spritePri;
+                mainPixel = spritePixel.color;
+                // Sprite color math: bit 4 of CGADSUB
+                colorMathApplies = (m_cgadsub & 0x10) != 0;
+            }
         }
-        
+
+        // ---- Color Math ----
+        // $2130 CGWSEL layout: MMCC DD.S
+        //   MM (bits 7-6): Prevent Color Math — 0=never prevent, 1=outside win, 2=inside win, 3=always prevent
+        //   CC (bits 5-4): Clip main screen to black before math — 0=never, 1=outside win, 2=inside win, 3=always
+        //   DD (bits 3-2): Color Math Enable area — 0=always, 1=inside win only, 2=outside win only, 3=never
+        //   bit 1: Sub-screen source — 0=fixed color, 1=sub screen
+        //   bit 0: Direct Color Mode (Mode 3/4/7 256-col)
+        // $2131 CGADSUB: bit7=subtract, bit6=half, bits5-0=per-layer enable
+
+        // Evaluate the color math window once (layer 5 = color window)
+        bool inColorWin = windowMaskLayer(5, false);
+
+        // Prevent Color Math check (MM bits 7-6)
+        uint8_t preventCondition = (m_cgws >> 6) & 0x03;
+        bool preventMath = false;
+        switch (preventCondition) {
+            case 0: preventMath = false;        break; // never prevent
+            case 1: preventMath = !inColorWin;  break; // prevent outside window
+            case 2: preventMath = inColorWin;   break; // prevent inside window
+            case 3: preventMath = true;         break; // always prevent
+        }
+
+        // Clip main screen to black (CC bits 5-4) — applied before color math
+        uint32_t clippedMain = mainPixel;
+        uint8_t clipCondition = (m_cgws >> 4) & 0x03;
+        bool doClip = false;
+        switch (clipCondition) {
+            case 0: doClip = false;        break; // never clip
+            case 1: doClip = !inColorWin;  break; // clip outside window
+            case 2: doClip = inColorWin;   break; // clip inside window
+            case 3: doClip = true;         break; // always clip
+        }
+        if (doClip) {
+            clippedMain = 0xFF000000; // clip to black (alpha=1, RGB=0)
+        }
+
+        // Color Math Enable area (DD bits 3-2): where math is performed
+        uint8_t mathCondition = (m_cgws >> 2) & 0x03;
+        bool inMathArea = false;
+        switch (mathCondition) {
+            case 0: inMathArea = true;        break; // always
+            case 1: inMathArea = inColorWin;  break; // inside window only
+            case 2: inMathArea = !inColorWin; break; // outside window only
+            case 3: inMathArea = false;       break; // never
+        }
+
+        bool doColorMath = colorMathApplies && !preventMath && inMathArea;
+
+        // When color math is NOT performed, the main pixel passes through unmodified.
+        // Clip-to-black only affects the main screen input when color math IS applied.
+        uint32_t finalColor = mainPixel;
+
+        if (doColorMath) {
+            // Apply clip-to-black only as input to color math
+            uint32_t mathInput = clippedMain;
+            // Subscreen source: CGWSEL bit1 (0=fixed color, 1=subscreen)
+            uint32_t subColor;
+            if (m_cgws & 0x02) {
+                // Use subscreen pixel
+                subColor = renderSubScreen(x);
+            } else {
+                // Use fixed color ($2132 COLDATA): 5-bit R/G/B expanded to 8-bit
+                uint8_t fr = (m_coldataR << 3) | (m_coldataR >> 2);
+                uint8_t fg = (m_coldataG << 3) | (m_coldataG >> 2);
+                uint8_t fb = (m_coldataB << 3) | (m_coldataB >> 2);
+                subColor = fr | (fg << 8) | (fb << 16) | (0xFF << 24);
+            }
+            finalColor = applyColorMath(mathInput, subColor);
+        }
+
 #ifdef DEBUG_PPU_RENDER
         if (m_scanline == 0 && x == 0) {
             std::ostringstream oss;
-            oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+            oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0')
                 << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
                 << "Scanline:" << std::setw(3) << m_scanline << " | "
                 << "Mode: " << (int)m_bgMode << std::dec << std::endl;
             Logger::getInstance().logPPU(oss.str());
         }
 #endif
-        
+
         // Apply brightness
         if (m_brightness < 15) {
-            // Extract RGB from 0xRRGGBBAA format
-            uint8_t r = ((finalColor >> 24) & 0xFF);
-            uint8_t g = ((finalColor >> 16) & 0xFF);
-            uint8_t b = ((finalColor >> 8) & 0xFF);
-            uint8_t a = (finalColor & 0xFF);
-            
+            uint8_t r = (finalColor & 0xFF);
+            uint8_t g = ((finalColor >> 8) & 0xFF);
+            uint8_t b = ((finalColor >> 16) & 0xFF);
+            uint8_t a = ((finalColor >> 24) & 0xFF);
             r = (r * m_brightness) / 15;
             g = (g * m_brightness) / 15;
             b = (b * m_brightness) / 15;
-            
-            finalColor = (r << 24) | (g << 16) | (b << 8) | a;
+            finalColor = r | (g << 8) | (b << 16) | (a << 24);
         }
-        
+
         m_framebuffer[m_scanline * SCREEN_WIDTH + x] = finalColor;
     }
     
@@ -474,8 +927,8 @@ void PPU::renderBackground() {
 // Supports both 2bpp and 4bpp tile decoding based on BG mode
 // tileX, tileY, pixelX, pixelY are already scrolled coordinates from the caller
 PixelInfo PPU::renderBGx(int bgIndex, int tileX, int tileY, int pixelX, int pixelY, int bpp) {
-    // Determine tile size based on bpp
-    const int TILE_SIZE_BYTES = (bpp == 4) ? 32 : 16;
+    // Determine tile size based on bpp (2bpp=16, 4bpp=32, 8bpp=64 bytes per 8x8 tile)
+    const int TILE_SIZE_BYTES = (bpp == 8) ? 64 : (bpp == 4) ? 32 : 16;
     
     // Check if this BG uses 16x16 tiles
     bool is16x16 = m_bgTileSize[bgIndex];
@@ -612,44 +1065,25 @@ PixelInfo PPU::renderBGx(int bgIndex, int tileX, int tileY, int pixelX, int pixe
         subPixelX = scrolledPixelX % 8;
         subPixelY = scrolledPixelY % 8;
         
-        // Calculate sub-tile number
-        // For 16x16 tiles, sub-tiles are arranged in VRAM:
-        // - Sub-tile 0: tileNumber (left-top)
-        // - Sub-tile 1: tileNumber + 1 (right-top)
-        // - Sub-tile 2: tileNumber + 16 (left-bottom) - Note: This is VRAM layout, not tilemap
-        // - Sub-tile 3: tileNumber + 17 (right-bottom)
-        // However, SNES actually uses tilemap width for sub-tile 2/3:
-        // - Sub-tile 2: tileNumber + (tilemap width in tiles)
-        // - Sub-tile 3: tileNumber + (tilemap width in tiles) + 1
-        
+        // For 16x16 tiles, sub-tiles are arranged in VRAM as:
+        //   top-left  = tileNumber
+        //   top-right = tileNumber + 1
+        //   bot-left  = tileNumber + 16  (wraps within 10-bit tile index)
+        //   bot-right = tileNumber + 17
+        // The offset is always 16 (SNES hardware spec), not tilemap width.
+
         // Apply flip BEFORE calculating sub-tile position
         if (hFlip) {
-            subTileX = 1 - subTileX;  // Flip horizontally within 16x16 tile
+            subTileX = 1 - subTileX;
             subPixelX = 7 - subPixelX;
         }
         if (vFlip) {
-            subTileY = 1 - subTileY;  // Flip vertically within 16x16 tile
+            subTileY = 1 - subTileY;
             subPixelY = 7 - subPixelY;
         }
-        
-        // Calculate sub-tile number based on position
-        if (subTileX == 0 && subTileY == 0) {
-            // Sub-tile 0 (left-top): use original tileNumber
-            subTileNumber = tileNumber;
-        } else if (subTileX == 1 && subTileY == 0) {
-            // Sub-tile 1 (right-top): tileNumber + 1
-            subTileNumber = tileNumber + 1;
-        } else if (subTileX == 0 && subTileY == 1) {
-            // Sub-tile 2 (left-bottom): tileNumber + tilemap width
-            subTileNumber = tileNumber + tilemapWidth;
-        } else { // subTileX == 1 && subTileY == 1
-            // Sub-tile 3 (right-bottom): tileNumber + tilemap width + 1
-            subTileNumber = tileNumber + tilemapWidth + 1;
-        }
-        
-        // After calculating sub-tile, apply flip to pixel coordinates within 8x8 sub-tile
-        // (We already applied flip to sub-tile position above, now flip the pixel)
-        // Actually, we already flipped subPixelX/Y above, so we're good
+
+        // Map sub-tile (0 or 1) in each axis to VRAM tile index
+        subTileNumber = (tileNumber + subTileX + subTileY * 16) & 0x03FF;
     } else {
         // 8x8 tile: Apply flip directly
         if (hFlip) {
@@ -908,16 +1342,15 @@ uint32_t PPU::renderBackgroundMode0(int x) {
     // If no BG pixel was found, use background color (CGRAM[0])
     if (finalColor == 0) {
         uint16_t bgColor = m_cgram[0] | (m_cgram[1] << 8);
-        // Always use black background
         if (bgColor == 0) {
-            return 0x000000FF; // Black (0xRRGGBBAA format)
+            return 0xFF000000; // Black (opaque, RGBA8888 byte order)
         }
-        // Extract RGB components (5 bits each)
+        // Extract RGB components (5 bits each) and scale to 8 bits
         uint8_t r = (bgColor & 0x1F) << 3;
         uint8_t g = ((bgColor >> 5) & 0x1F) << 3;
         uint8_t b = ((bgColor >> 10) & 0x1F) << 3;
-        // Convert to 32-bit RGBA (0xRRGGBBAA format)
-        return (r << 24) | (g << 16) | (b << 8) | 0xFF;
+        // RGBA8888 byte order: little-endian uint32 = 0xAABBGGRR
+        return r | (g << 8) | (b << 16) | (0xFF << 24);
     }
 
     // Return final color. (Background color before Sprite or Color Math is applied)
@@ -978,15 +1411,335 @@ uint32_t PPU::renderBackgroundMode1(int x) {
     if (finalColor == 0) {
         uint16_t bgColor = m_cgram[0] | (m_cgram[1] << 8);
         if (bgColor == 0) {
-            return 0x000000FF; // Default to black (0xRRGGBBAA format)
+            return 0xFF000000; // Black (opaque, RGBA8888 byte order)
         }
         uint8_t r = (bgColor & 0x1F) << 3;
         uint8_t g = ((bgColor >> 5) & 0x1F) << 3;
         uint8_t b = ((bgColor >> 10) & 0x1F) << 3;
-        return (r << 24) | (g << 16) | (b << 8) | 0xFF; // 0xRRGGBBAA format
+        return r | (g << 8) | (b << 16) | (0xFF << 24);
     }
-    
+
     return finalColor;
+}
+
+// ============================================================
+// Helper: get background color from CGRAM[0]
+// ============================================================
+static uint32_t getBGColorFromCGRAM(const std::vector<uint8_t>& cgram) {
+    uint16_t c = cgram[0] | (cgram[1] << 8);
+    if (c == 0) return 0xFF000000;
+    uint8_t r = (c & 0x1F) << 3;
+    uint8_t g = ((c >> 5) & 0x1F) << 3;
+    uint8_t b = ((c >> 10) & 0x1F) << 3;
+    return r | (g << 8) | (b << 16) | (0xFF << 24);
+}
+
+// Member helper: apply scroll, compute tile coords, call renderBGx
+PixelInfo PPU::sampleBGLayer(int bgIndex, int screenX, int screenY,
+                              int scrollX, int scrollY, int bpp, bool is16x16) {
+    int tileSize = is16x16 ? 16 : 8;
+    int bgX = screenX + scrollX;
+    int bgY = screenY + scrollY;
+    int tileX = bgX / tileSize;
+    int tileY = bgY / tileSize;
+    int pixelX = bgX % tileSize;
+    int pixelY = bgY % tileSize;
+    if (pixelX < 0) { pixelX += tileSize; tileX -= 1; }
+    if (pixelY < 0) { pixelY += tileSize; tileY -= 1; }
+    return renderBGx(bgIndex, tileX, tileY, pixelX, pixelY, bpp);
+}
+
+// Helper: composite layers by priority and main-screen designation, return final RGBA
+static uint32_t compositeLayers(const PixelInfo* pixels, int count,
+                                 uint8_t mainScreenDesignation,
+                                 const std::vector<uint8_t>& cgram) {
+    uint32_t finalColor = 0;
+    uint8_t maxPriority = 0;
+    bool found = false;
+    for (int i = 0; i < count; ++i) {
+        if (!(mainScreenDesignation & (1 << i))) continue;
+        if (pixels[i].color != 0) {
+            if (!found || pixels[i].priority >= maxPriority) {
+                maxPriority = pixels[i].priority;
+                finalColor = pixels[i].color;
+                found = true;
+            }
+        }
+    }
+    if (finalColor == 0) return getBGColorFromCGRAM(cgram);
+    return finalColor;
+}
+
+// ============================================================
+// OPT (Offset-Per-Tile) helper
+// SNES Mode 2/4/6: BG3 tilemap provides per-tile H/V offsets
+// Returns offsetX and offsetY for the tile at screen position (screenX, screenY)
+// bgTileSize: tile width/height of the target BG (8 or 16 pixels)
+// ============================================================
+static void getOPTOffsets(const std::vector<uint8_t>& vram,
+                           uint16_t bg3MapAddr, uint8_t bg3MapSize,
+                           int screenX, int screenY, int bgTileSize,
+                           int& outOffsetX, int& outOffsetY)
+{
+    // The OPT column index is determined by which tile column the current pixel falls in.
+    // For an 8-pixel tile, tile column = (screenX) / 8 (NOT scrolled).
+    // For a 16-pixel tile, tile column = (screenX) / 16.
+    int tileCol = screenX / bgTileSize;  // tile column in screen space
+
+    // BG3 tilemap lookup: row 0 maps to tile column 0, etc.
+    int bg3TilemapWidth = (bg3MapSize & 1) ? 64 : 32;
+    int bg3TilemapHeight = (bg3MapSize & 2) ? 64 : 32;
+    int wrappedCol = ((tileCol % bg3TilemapWidth) + bg3TilemapWidth) % bg3TilemapWidth;
+    // Row in the OPT table comes from the screen row / tile height (unscrolled)
+    int tileRow = screenY / bgTileSize;
+    int wrappedRow = ((tileRow % bg3TilemapHeight) + bg3TilemapHeight) % bg3TilemapHeight;
+
+    uint16_t screenXoff = wrappedCol / 32;
+    uint16_t screenYoff = wrappedRow / 32;
+    uint16_t localCol = wrappedCol % 32;
+    uint16_t localRow = wrappedRow % 32;
+    uint16_t screenOffset = 0;
+    if (bg3MapSize & 1) screenOffset += screenXoff * 2048;
+    if (bg3MapSize & 2) screenOffset += screenYoff * 2048 * ((bg3MapSize & 1) ? 2 : 1);
+    uint16_t mapAddr = bg3MapAddr + screenOffset + (localRow * 32 + localCol) * 2;
+
+    outOffsetX = 0;
+    outOffsetY = 0;
+    if (mapAddr + 1 >= (uint16_t)vram.size()) return;
+
+    uint16_t entry = vram[mapAddr] | (vram[mapAddr + 1] << 8);
+    // Bits 10-12 of the OPT entry select which offset is applied:
+    // Bit 13 (priority flag in normal tilemap): if set, entry provides V-offset;
+    // otherwise H-offset.  Both entries exist (even column = H, odd column = V in some
+    // docs), but the simplest correct interpretation used by most emulators:
+    //   entry.bit13 == 0 → H offset value in bits 0-9 (10-bit signed, but SNES uses
+    //                       bits 0-8 for unsigned 0..511; treat as signed 9-bit)
+    //   entry.bit13 == 1 → V offset value in bits 0-9
+    // Actual hardware: two consecutive OPT entries per column — first is H, second is V.
+    // Here we use the single-entry model for simplicity (matches most games).
+    bool isVOffset = (entry >> 13) & 1;
+    int16_t offsetVal = (int16_t)((entry & 0x01FF) << 7) >> 7; // sign-extend 9-bit
+
+    if (!isVOffset) {
+        outOffsetX = offsetVal;
+    } else {
+        outOffsetY = offsetVal;
+    }
+}
+
+// ============================================================
+// Mode 2: 4bpp BG1 + 4bpp BG2 + Offset-Per-Tile (BG3 provides offsets)
+// ============================================================
+uint32_t PPU::renderBackgroundMode2(int x) {
+    int y = m_scanline;
+
+    // Priority: BG1.high(3), BG2.high(2), BG1.low(1), BG2.low(0)
+    // (Mode 2 uses the same two-layer 4bpp scheme as Mode 1 for BG1/BG2)
+
+    // --- OPT: read per-tile offsets from BG3 tilemap ---
+    int optOffsetX = 0, optOffsetY = 0;
+    getOPTOffsets(m_vram, m_bgMapAddr[2], m_bgMapSize[2],
+                  x, y, m_bgTileSize[0] ? 16 : 8,
+                  optOffsetX, optOffsetY);
+
+    // BG1 (4bpp) with OPT
+    int bg1ScrollX = (int)(m_bg1ScrollX & 0x03FF); if (bg1ScrollX >= 512) bg1ScrollX -= 1024;
+    int bg1ScrollY = (int)(m_bg1ScrollY & 0x03FF); if (bg1ScrollY >= 512) bg1ScrollY -= 1024;
+    PixelInfo bg1 = sampleBGLayer(0, x, y,
+                                   bg1ScrollX + optOffsetX, bg1ScrollY + optOffsetY,
+                                   4, m_bgTileSize[0]);
+
+    // BG2 (4bpp) with OPT
+    int bg2ScrollX = (int)(m_bg2ScrollX & 0x03FF); if (bg2ScrollX >= 512) bg2ScrollX -= 1024;
+    int bg2ScrollY = (int)(m_bg2ScrollY & 0x03FF); if (bg2ScrollY >= 512) bg2ScrollY -= 1024;
+    PixelInfo bg2 = sampleBGLayer(1, x, y,
+                                   bg2ScrollX + optOffsetX, bg2ScrollY + optOffsetY,
+                                   4, m_bgTileSize[1]);
+
+    PixelInfo layers[4] = {bg1, bg2, {0,0}, {0,0}};
+    return compositeLayers(layers, 2, m_mainScreenDesignation, m_cgram);
+}
+
+// ============================================================
+// Mode 3: 8bpp BG1 + 4bpp BG2
+// ============================================================
+uint32_t PPU::renderBackgroundMode3(int x) {
+    int y = m_scanline;
+
+    int bg1ScrollX = (int)(m_bg1ScrollX & 0x03FF); if (bg1ScrollX >= 512) bg1ScrollX -= 1024;
+    int bg1ScrollY = (int)(m_bg1ScrollY & 0x03FF); if (bg1ScrollY >= 512) bg1ScrollY -= 1024;
+    PixelInfo bg1 = sampleBGLayer(0, x, y, bg1ScrollX, bg1ScrollY, 8, m_bgTileSize[0]);
+
+    int bg2ScrollX = (int)(m_bg2ScrollX & 0x03FF); if (bg2ScrollX >= 512) bg2ScrollX -= 1024;
+    int bg2ScrollY = (int)(m_bg2ScrollY & 0x03FF); if (bg2ScrollY >= 512) bg2ScrollY -= 1024;
+    PixelInfo bg2 = sampleBGLayer(1, x, y, bg2ScrollX, bg2ScrollY, 4, m_bgTileSize[1]);
+
+    // Mode 3 priorities: BG1.high=3, BG2.high=2, BG1.low=1, BG2.low=0
+    // renderBGx already assigns priority from m_bgPriority; update them for Mode 3
+    // (priority array is set during BGMODE write; here we trust those values)
+    PixelInfo layers[4] = {bg1, bg2, {0,0}, {0,0}};
+    return compositeLayers(layers, 2, m_mainScreenDesignation, m_cgram);
+}
+
+// ============================================================
+// Mode 4: 8bpp BG1 + 2bpp BG2 + Offset-Per-Tile
+// ============================================================
+uint32_t PPU::renderBackgroundMode4(int x) {
+    int y = m_scanline;
+
+    // OPT uses BG3 tilemap just like Mode 2 (even though BG3 has no visible layer)
+    int optOffsetX = 0, optOffsetY = 0;
+    getOPTOffsets(m_vram, m_bgMapAddr[2], m_bgMapSize[2],
+                  x, y, m_bgTileSize[0] ? 16 : 8,
+                  optOffsetX, optOffsetY);
+
+    int bg1ScrollX = (int)(m_bg1ScrollX & 0x03FF); if (bg1ScrollX >= 512) bg1ScrollX -= 1024;
+    int bg1ScrollY = (int)(m_bg1ScrollY & 0x03FF); if (bg1ScrollY >= 512) bg1ScrollY -= 1024;
+    PixelInfo bg1 = sampleBGLayer(0, x, y,
+                                   bg1ScrollX + optOffsetX, bg1ScrollY + optOffsetY,
+                                   8, m_bgTileSize[0]);
+
+    int bg2ScrollX = (int)(m_bg2ScrollX & 0x03FF); if (bg2ScrollX >= 512) bg2ScrollX -= 1024;
+    int bg2ScrollY = (int)(m_bg2ScrollY & 0x03FF); if (bg2ScrollY >= 512) bg2ScrollY -= 1024;
+    PixelInfo bg2 = sampleBGLayer(1, x, y,
+                                   bg2ScrollX + optOffsetX, bg2ScrollY + optOffsetY,
+                                   2, m_bgTileSize[1]);
+
+    PixelInfo layers[4] = {bg1, bg2, {0,0}, {0,0}};
+    return compositeLayers(layers, 2, m_mainScreenDesignation, m_cgram);
+}
+
+// ============================================================
+// Mode 5: Hi-res 512x224 — 4bpp BG1 + 2bpp BG2
+// The SNES renders at 512px wide in this mode (interlaced/hi-res).
+// We map each output pixel x to hi-res pixel 2*x (even sub-pixel).
+// ============================================================
+uint32_t PPU::renderBackgroundMode5(int x) {
+    int y = m_scanline;
+
+    // In hi-res mode the effective pixel width is 512; we sample the even sub-pixel.
+    int hiresX = x * 2;
+
+    int bg1ScrollX = (int)(m_bg1ScrollX & 0x03FF); if (bg1ScrollX >= 512) bg1ScrollX -= 1024;
+    int bg1ScrollY = (int)(m_bg1ScrollY & 0x03FF); if (bg1ScrollY >= 512) bg1ScrollY -= 1024;
+    PixelInfo bg1 = sampleBGLayer(0, hiresX, y, bg1ScrollX, bg1ScrollY, 4, m_bgTileSize[0]);
+
+    int bg2ScrollX = (int)(m_bg2ScrollX & 0x03FF); if (bg2ScrollX >= 512) bg2ScrollX -= 1024;
+    int bg2ScrollY = (int)(m_bg2ScrollY & 0x03FF); if (bg2ScrollY >= 512) bg2ScrollY -= 1024;
+    PixelInfo bg2 = sampleBGLayer(1, hiresX, y, bg2ScrollX, bg2ScrollY, 2, m_bgTileSize[1]);
+
+    PixelInfo layers[4] = {bg1, bg2, {0,0}, {0,0}};
+    return compositeLayers(layers, 2, m_mainScreenDesignation, m_cgram);
+}
+
+// ============================================================
+// Mode 7: Affine-transform single BG
+// 128×128 tile map, 8bpp tiles (64 bytes each)
+// VRAM layout:
+//   [0x0000-0x3FFF] tilemap: word-interleaved; even bytes = tile index, odd bytes unused
+//   [0x4000-0x7FFF] tile character data: 8×8 × 8bpp = 64 bytes/tile × 256 tiles
+// Scroll is taken from BG1 scroll registers (m_bg1ScrollX / m_bg1ScrollY),
+// which are also written to $210D/$210E as m7hofs/m7vofs on real hardware.
+// ============================================================
+uint32_t PPU::renderBackgroundMode7(int x) {
+    int y = m_scanline;
+
+    // --- Matrix parameters (8.8 fixed-point stored as int16_t) ---
+    // m_m7a..d are int16_t holding the 16-bit signed value written to $211B-$211E.
+    // Each has 8 fractional bits, so "1.0" = 0x0100.
+    int32_t A = m_m7a;
+    int32_t B = m_m7b;
+    int32_t C = m_m7c;
+    int32_t D = m_m7d;
+
+    // Center of rotation/scaling (13-bit signed)
+    int32_t cx = m_m7x;
+    int32_t cy = m_m7y;
+
+    // Scroll (HOFS/VOFS for Mode 7, 13-bit signed)
+    int32_t hofs = (int32_t)m_m7hofs;
+    int32_t vofs = (int32_t)m_m7vofs;
+
+    // M7SEL bit 0 = H-flip, bit 1 = V-flip: flip screen pixel BEFORE the transform
+    int32_t px = (m_m7sel & 0x01) ? (255 - x) : x;
+    int32_t py = (m_m7sel & 0x02) ? (255 - y) : y;
+
+    // Transform: source map coordinates (8 fractional bits)
+    // org_x = [A*(px + hofs - cx) + B*(py + vofs - cy)] >> 8 + cx
+    // org_y = [C*(px + hofs - cx) + D*(py + vofs - cy)] >> 8 + cy
+    int32_t originX = hofs - cx;
+    int32_t originY = vofs - cy;
+
+    int32_t srcX = A * originX + B * originY + A * px + B * py + (cx << 8);
+    int32_t srcY = C * originX + D * originY + C * px + D * py + (cy << 8);
+
+    // Convert from fixed-point (>> 8) to integer map pixel coordinates
+    int32_t mapX = srcX >> 8;
+    int32_t mapY = srcY >> 8;
+
+    // M7SEL bits 7-6: outside-field handling
+    //   bit7 (R): Screen Over — 0=wrap map, 1=outside (use bit6 to determine fill)
+    //   bit6 (C): Empty Space Fill — 0=transparent, 1=fill with tile 0
+    bool screenOver = (m_m7sel & 0x80) != 0;  // bit7: 1 = don't wrap
+    bool fillTile0  = (m_m7sel & 0x40) != 0;  // bit6: 1 = fill with tile 0 instead of transparent
+    bool outOfBounds = false;
+    if (mapX < 0 || mapX >= 1024 || mapY < 0 || mapY >= 1024) {
+        if (!screenOver) {
+            // Wrap (tile space is 128×128 tiles × 8px = 1024px)
+            mapX = ((mapX % 1024) + 1024) % 1024;
+            mapY = ((mapY % 1024) + 1024) % 1024;
+        } else if (!fillTile0) {
+            // Outside = transparent (show backdrop)
+            return getBGColorFromCGRAM(m_cgram);
+        } else {
+            // Outside = fill with tile 0 colour data
+            outOfBounds = true;
+        }
+    }
+
+    // --- VRAM Mode 7 layout (word-interleaved) ---
+    // Both the tilemap and tile pixel data share VRAM starting at word address 0x0000.
+    // VRAM byte address = word_address * 2.
+    //   Even bytes (offset 0): tilemap — tile index (0-255) at map position (tx, ty)
+    //                          word address = ty * 128 + tx
+    //   Odd bytes (offset 1):  tile pixel data — 8bpp colour index for tile N pixel (px, py)
+    //                          word address = N * 64 + py * 8 + px
+    uint8_t colorIndex;
+    if (outOfBounds) {
+        // Use tile 0 pixel data for fill (mapX/Y are out-of-range; sample tile 0 pixel)
+        int pixX = ((mapX % 8) + 8) % 8;  // positive modulo 8 for sub-pixel within tile 0
+        int pixY = ((mapY % 8) + 8) % 8;
+        // Tile 0 pixel data: word address = 0*64 + pixY*8 + pixX; odd byte
+        uint32_t tileDataByteAddr = (uint32_t)(pixY * 8 + pixX) * 2 + 1;
+        if (tileDataByteAddr >= m_vram.size()) return getBGColorFromCGRAM(m_cgram);
+        colorIndex = m_vram[tileDataByteAddr];
+    } else {
+        int tileX = (mapX >> 3) & 127;  // tile column (0-127)
+        int tileY = (mapY >> 3) & 127;  // tile row    (0-127)
+        int pixX  = mapX & 7;
+        int pixY  = mapY & 7;
+
+        // Tilemap: word address = tileY*128 + tileX; even byte = tile index
+        uint32_t tilemapByteAddr = (uint32_t)(tileY * 128 + tileX) * 2;
+        if (tilemapByteAddr >= m_vram.size()) return getBGColorFromCGRAM(m_cgram);
+        uint8_t tileIndex = m_vram[tilemapByteAddr];
+
+        // Tile pixel data: word address = tileIndex*64 + pixY*8 + pixX; odd byte = 8bpp colour
+        uint32_t tileDataByteAddr = (uint32_t)(tileIndex * 64 + pixY * 8 + pixX) * 2 + 1;
+        if (tileDataByteAddr >= m_vram.size()) return getBGColorFromCGRAM(m_cgram);
+        colorIndex = m_vram[tileDataByteAddr];
+    }
+
+    if (colorIndex == 0) return getBGColorFromCGRAM(m_cgram);  // transparent
+
+    // Mode 7 is 8bpp direct color (palette 0)
+    uint16_t cgramIdx = (uint16_t)(colorIndex * 2);
+    if (cgramIdx + 1 >= (uint16_t)m_cgram.size()) return getBGColorFromCGRAM(m_cgram);
+    uint16_t snesColor = m_cgram[cgramIdx] | (m_cgram[cgramIdx + 1] << 8);
+    uint8_t r = (snesColor & 0x1F) << 3;
+    uint8_t g = ((snesColor >> 5) & 0x1F) << 3;
+    uint8_t b = ((snesColor >> 10) & 0x1F) << 3;
+    return r | (g << 8) | (b << 16) | (0xFF << 24);
 }
 
 uint32_t PPU::renderBackgroundMode6(int x) {
@@ -1036,14 +1789,14 @@ uint32_t PPU::renderBackgroundMode6(int x) {
         // Return background color
         uint16_t bgColor = m_cgram[0] | (m_cgram[1] << 8);
         if (bgColor == 0) {
-            return 0x000000FF; // Black (0xRRGGBBAA format)
+            return 0xFF000000; // Black (opaque, RGBA8888 byte order)
         }
         uint8_t r = (bgColor & 0x1F) << 3;
         uint8_t g = ((bgColor >> 5) & 0x1F) << 3;
         uint8_t b = ((bgColor >> 10) & 0x1F) << 3;
-        return (r << 24) | (g << 16) | (b << 8) | 0xFF; // 0xRRGGBBAA format
+        return r | (g << 8) | (b << 16) | (0xFF << 24);
     }
-    
+
     // Read offset from BG3 tilemap entry
     uint16_t bg3TileEntry = m_vram[bg3MapAddr] | (m_vram[bg3MapAddr + 1] << 8);
     // In Mode 6, BG3 tilemap entry provides offset
@@ -1072,24 +1825,27 @@ uint32_t PPU::renderBackgroundMode6(int x) {
     // Return background color
     uint16_t bgColor = m_cgram[0] | (m_cgram[1] << 8);
     if (bgColor == 0) {
-        return 0x000000FF; // Black (0xRRGGBBAA format)
+        return 0xFF000000; // Black (opaque, RGBA8888 byte order)
     }
-    uint8_t r = (bgColor & 0x1F) << 3;
-    uint8_t g = ((bgColor >> 5) & 0x1F) << 3;
-    uint8_t b = ((bgColor >> 10) & 0x1F) << 3;
-    return (0xFF << 24) | (r << 16) | (g << 8) | b;
+    uint8_t rv = (bgColor & 0x1F);
+    uint8_t gv = (bgColor >> 5) & 0x1F;
+    uint8_t bv = (bgColor >> 10) & 0x1F;
+    uint8_t r = (rv << 3) | (rv >> 2);
+    uint8_t g = (gv << 3) | (gv >> 2);
+    uint8_t b = (bv << 3) | (bv >> 2);
+    return r | (g << 8) | (b << 16) | (0xFF << 24);
 }
 
 uint32_t PPU::renderTestPattern(int x) {
-    // Simple test pattern with different colors
+    // Simple test pattern with different colors (RGBA8888 byte order)
     if (m_scanline < 50) {
-        return 0xFF0000FF; // Blue
+        return 0xFFFF0000; // Blue  (R=0,G=0,B=255,A=255)
     } else if (m_scanline < 100) {
-        return 0xFF00FF00; // Green  
+        return 0xFF00FF00; // Green (R=0,G=255,B=0,A=255)
     } else if (m_scanline < 150) {
-        return 0xFFFF0000; // Red
+        return 0xFF0000FF; // Red   (R=255,G=0,B=0,A=255)
     } else {
-        return 0xFFFFFF00; // Yellow
+        return 0xFF00FFFF; // Yellow(R=255,G=255,B=0,A=255)
     }
 }
 
@@ -1112,17 +1868,22 @@ uint32_t PPU::getColor(uint8_t paletteIndex, uint8_t colorIndex, int bpp) {
     }
 
     if (cgramIndex + 1 >= m_cgram.size()) {
-        return 0x000000FF; // Black
+        return 0xFF000000; // Black (opaque, RGBA8888 byte order)
     }
 
     uint16_t snesColor = m_cgram[cgramIndex] | (m_cgram[cgramIndex + 1] << 8);
 
     // Extract RGB components (5 bits each) and scale to 8 bits
-    uint8_t r = (snesColor & 0x1F) << 3;
-    uint8_t g = ((snesColor >> 5) & 0x1F) << 3;
-    uint8_t b = ((snesColor >> 10) & 0x1F) << 3;
+    // Use (v<<3)|(v>>2) to map 0x1F→0xFF correctly (not just 0xF8)
+    uint8_t rv = (snesColor & 0x1F);
+    uint8_t gv = (snesColor >> 5) & 0x1F;
+    uint8_t bv = (snesColor >> 10) & 0x1F;
+    uint8_t r = (rv << 3) | (rv >> 2);
+    uint8_t g = (gv << 3) | (gv >> 2);
+    uint8_t b = (bv << 3) | (bv >> 2);
 
-    return (r << 24) | (g << 16) | (b << 8) | 0xFF;
+    // RGBA8888 byte order: little-endian uint32 = 0xAABBGGRR
+    return r | (g << 8) | (b << 16) | (0xFF << 24);
 }
 
 void PPU::decodeTile(const uint8_t* tileData, uint8_t output[64], int bpp) {
@@ -1494,25 +2255,34 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         // Don't flush here - too frequent, causes performance issues
     }
     // Static warning flags (declared outside switch to avoid initialization issues)
-    static bool warnedWindow = false;
     static bool warnedColorMath = false;
     
     switch (address) {
         case 0x2100: { // INIDISP - Screen Display
+            bool prevFB = m_forcedBlank;
             m_brightness = value & 0x0F;
             m_forcedBlank = (value & 0x80) != 0;
-            static int displayChangeCount = 0;
-            if (displayChangeCount < 1000) {
-                
-                std::ostringstream oss;
-                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
-                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
-                    << "PPU: INIDISP=$" << std::hex << (int)value << std::dec 
-                          << " - Forced blank " << (m_forcedBlank ? "ON" : "OFF") 
-                          << ", brightness=" << (int)m_brightness << std::endl;
-                Logger::getInstance().logPPU(oss.str());
-                Logger::getInstance().flush();
-                displayChangeCount++;
+            // Log every change in forced-blank state (stderr for immediate visibility)
+            if (m_forcedBlank != prevFB || (frameCount >= 170 && frameCount <= 180)) {
+                static int displayChangeCount = 0;
+                if (displayChangeCount < 500) {
+                    fprintf(stderr, "[INIDISP] F:%d $2100=%02X fb=%d->%d bright=%d scan=%d\n",
+                            frameCount, value, (int)prevFB, (int)m_forcedBlank, (int)m_brightness, m_scanline);
+                    displayChangeCount++;
+                }
+            } else {
+                static int displayChangeCount2 = 0;
+                if (displayChangeCount2 < 3) {
+                    std::ostringstream oss;
+                    oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0')
+                        << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                        << "PPU: INIDISP=$" << std::hex << (int)value << std::dec
+                              << " - Forced blank " << (m_forcedBlank ? "ON" : "OFF")
+                              << ", brightness=" << (int)m_brightness << std::endl;
+                    Logger::getInstance().logPPU(oss.str());
+                    Logger::getInstance().flush();
+                    displayChangeCount2++;
+                }
             }
             
 
@@ -1520,15 +2290,55 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         }
             
         case 0x4200: { // NMITIMEN - Interrupt Enable
+            bool prevNmiEnabled = m_nmiEnabled;
             m_nmiEnabled = (value & 0x80) != 0;
+            m_irqMode = (value >> 4) & 0x03;  // bits 5-4: 0=off,1=H,2=V,3=H+V
+
+            // SNES hardware: NMI is edge-triggered on the enable bit.
+            // If NMI enable transitions 0->1 while VBlank NMI flag ($4210 bit7)
+            // is already set, an NMI fires immediately. This is correct hardware
+            // behavior per fullsnes docs. ROMs that re-enable NMI during VBlank
+            // without first reading $4210 (to clear the flag) will get a second
+            // NMI, which is expected. Well-behaved ROMs read $4210 in their NMI
+            // handler to acknowledge VBlank before re-enabling NMI.
+            // Only fire NMI on 0→1 edge if not already fired this VBlank.
+            // This prevents double-NMI when the NMI handler re-enables $4200 while
+            // the VBlank flag is still set (which would cause infinite re-entry).
+            if (m_nmiEnabled && !prevNmiEnabled && m_nmiFlag && m_cpu
+                && !m_nmiAlreadyFiredThisVBlank) {
+                m_cpu->triggerNMI();
+                m_nmiAlreadyFiredThisVBlank = true;
+            }
+
             static int nmiEnableCount = 0;
-            if (nmiEnableCount < 10) {
+            if (nmiEnableCount < 20) {
                 std::cout << "PPU: NMI " << (m_nmiEnabled ? "ENABLED" : "DISABLED")
-                          << " (value=$" << std::hex << (int)value << std::dec << ")" << std::endl;
+                          << " IRQmode=" << (int)m_irqMode
+                          << " (value=$" << std::hex << (int)value << std::dec << ")"
+                          << " scan=" << m_scanline
+                          << " nmiFlag=" << m_nmiFlag
+                          << " alreadyFired=" << m_nmiAlreadyFiredThisVBlank
+                          << std::endl;
                 nmiEnableCount++;
             }
             break;
         }
+
+        case 0x4207: // HTIMEL - H-IRQ timer low byte
+            m_htimer = (m_htimer & 0x0100) | value;
+            break;
+
+        case 0x4208: // HTIMEH - H-IRQ timer high bit
+            m_htimer = (m_htimer & 0x00FF) | ((value & 0x01) << 8);
+            break;
+
+        case 0x4209: // VTIMEL - V-IRQ timer low byte
+            m_vtimer = (m_vtimer & 0x0100) | value;
+            break;
+
+        case 0x420A: // VTIMEH - V-IRQ timer high bit
+            m_vtimer = (m_vtimer & 0x00FF) | ((value & 0x01) << 8);
+            break;
             
         case 0x420B: { // MDMAEN - DMA Enable
             // DMA not implemented yet, just acknowledge the write
@@ -1561,49 +2371,59 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         }
             
         case 0x2101: { // OBSEL - Object Size and Base Address
+            uint8_t oldObjSize = m_objSize;
             m_objSize = value;
             static int obselCount = 0;
             if (obselCount < 300) {
                 std::ostringstream oss;
-                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
+                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0')
                     << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
                     << "PPU: OBSEL=$" << std::hex << (int)value << std::dec << std::endl;
                 Logger::getInstance().logPPU(oss.str());
                 Logger::getInstance().flush();  // Flush at frame end
                 obselCount++;
             }
+            // Always log OBSEL changes to stderr for test debugging
+            fprintf(stderr, "[OBSEL] F:%d OBSEL=$%02X (sizeMode=%d) was=$%02X\n",
+                frameCount, value, (value >> 5) & 0x07, oldObjSize);
             break;
         }
             
         case 0x2105: { // BGMODE - BG Mode and Character Size
             m_bgMode = value & 0x07;
             
-            // Extract tile size settings (bits 3-6)
-            // Bit 3: BG3 Tile Size (0=8x8, 1=16x16)
-            // Bit 4: BG4 Tile Size (0=8x8, 1=16x16)
-            // Bit 5: BG1 Tile Size (0=8x8, 1=16x16)
-            // Bit 6: BG2 Tile Size (0=8x8, 1=16x16)
-            m_bgTileSize[2] = (value & 0x08) != 0;  // BG3 (bit 3)
-            m_bgTileSize[3] = (value & 0x10) != 0;  // BG4 (bit 4)
-            m_bgTileSize[0] = (value & 0x20) != 0;  // BG1 (bit 5)
-            m_bgTileSize[1] = (value & 0x40) != 0;  // BG2 (bit 6)
+            // Extract tile size settings (bits 4-7)
+            // Bit 3: Mode 1 BG3 Priority (NOT tile size)
+            // Bit 4: BG1 Tile Size (0=8x8, 1=16x16)
+            // Bit 5: BG2 Tile Size (0=8x8, 1=16x16)
+            // Bit 6: BG3 Tile Size (0=8x8, 1=16x16)
+            // Bit 7: BG4 Tile Size (0=8x8, 1=16x16)
+            m_bgTileSize[0] = (value & 0x10) != 0;  // BG1 (bit 4)
+            m_bgTileSize[1] = (value & 0x20) != 0;  // BG2 (bit 5)
+            m_bgTileSize[2] = (value & 0x40) != 0;  // BG3 (bit 6)
+            m_bgTileSize[3] = (value & 0x80) != 0;  // BG4 (bit 7)
             
             // Update priority settings based on BG mode
+            // Composite priority scale: SP3=15, SP2=11, SP1=7, SP0=3
             switch (m_bgMode) {
-                case 0: // Mode 0: All BGs are 2bpp (4 colors)
-                    m_bgPriority[0][0] = 0; m_bgPriority[0][1] = 3; // BG1
-                    m_bgPriority[1][0] = 0; m_bgPriority[1][1] = 2; // BG2
-                    m_bgPriority[2][0] = 0; m_bgPriority[2][1] = 1; // BG3
-                    m_bgPriority[3][0] = 0; m_bgPriority[3][1] = 0; // BG4
+                case 0: // Mode 0: SP3>BG1hi>BG2hi>SP2>BG1lo>BG2lo>SP1>BG3hi>BG4hi>SP0>BG3lo>BG4lo>BD
+                    m_bgPriority[0][0] = 9;  m_bgPriority[0][1] = 13; // BG1 lo/hi
+                    m_bgPriority[1][0] = 8;  m_bgPriority[1][1] = 12; // BG2 lo/hi
+                    m_bgPriority[2][0] = 2;  m_bgPriority[2][1] = 5;  // BG3 lo/hi
+                    m_bgPriority[3][0] = 1;  m_bgPriority[3][1] = 4;  // BG4 lo/hi
                     break;
-                case 1: // Mode 1: BG1/BG2=4bpp, BG3=2bpp
-                    m_bgPriority[0][0] = 1; m_bgPriority[0][1] = 3; // BG1
-                    m_bgPriority[1][0] = 0; m_bgPriority[1][1] = 2; // BG2
-                    m_bgPriority[2][0] = 0; m_bgPriority[2][1] = 1; // BG3
-                    m_bgPriority[3][0] = 0; m_bgPriority[3][1] = 0; // BG4 (not used)
+                case 1: // Mode 1: SP3>BG1hi>BG2hi>SP2>BG1lo>BG2lo>SP1>BG3hi>SP0>BG3lo>BD
+                    m_bgPriority[0][0] = 9;  m_bgPriority[0][1] = 13; // BG1 lo/hi
+                    m_bgPriority[1][0] = 8;  m_bgPriority[1][1] = 12; // BG2 lo/hi
+                    m_bgPriority[2][0] = 2;  m_bgPriority[2][1] = 5;  // BG3 lo/hi (hi beats SP0=3)
+                    m_bgPriority[3][0] = 0;  m_bgPriority[3][1] = 0;  // BG4 not used
                     break;
                 default:
-                    // Add other modes as needed
+                    // Other modes: use Mode 0 defaults
+                    m_bgPriority[0][0] = 9;  m_bgPriority[0][1] = 13;
+                    m_bgPriority[1][0] = 8;  m_bgPriority[1][1] = 12;
+                    m_bgPriority[2][0] = 2;  m_bgPriority[2][1] = 5;
+                    m_bgPriority[3][0] = 1;  m_bgPriority[3][1] = 4;
                     break;
             }
             
@@ -1633,41 +2453,86 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         }
             
         case 0x2116: { // VMADDL - VRAM Address Low
+            // Real SNES: writing $2116 (low byte) only updates VMADD low byte.
+            // No prefetch reload on $2116 write alone.
+            uint16_t prevVMADD16 = m_vramAddress;
             m_vramAddress = (m_vramAddress & 0xFF00) | value;
+            if (frameCount >= 145 && frameCount <= 165) {
+                static int va16L = 0; if (va16L < 200) {
+                    fprintf(stderr, "[VT] F:%d $2116=%02X addr:0x%04X->0x%04X pref=%02X\n",
+                            frameCount, value, prevVMADD16, m_vramAddress, m_vramReadBuffer);
+                    va16L++;
+                }
+            }
             break;
         }
-            
+
         case 0x2117: { // VMADDH - VRAM Address High
-            m_vramAddress = (m_vramAddress & 0x00FF) | (value << 8);
-            static int vramAddrCount = 0;
-            if (vramAddrCount < 3) {
-                
-                std::ostringstream oss;
-                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
-                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
-                    << "PPU: VRAM Address=0x" << std::hex << m_vramAddress << std::dec << std::endl;
-                Logger::getInstance().logPPU(oss.str());
-                Logger::getInstance().flush();  // Flush at frame end
-                vramAddrCount++;
+            // Real SNES: writing $2117 (high byte) updates VMADD and IMMEDIATELY
+            // reloads the prefetch buffer from the new VMADD address.
+            uint16_t prevVMADD17 = m_vramAddress;
+            m_vramAddress = (m_vramAddress & 0x00FF) | ((uint16_t)value << 8);
+            {
+                uint16_t m = applyVRAMMapping(m_vramAddress);
+                m_vramReadBuffer  = readVRAM(m * 2);
+                m_vramReadBufferH = readVRAM(m * 2 + 1);
+            }
+            if (frameCount >= 145 && frameCount <= 165) {
+                static int va17H = 0; if (va17H < 200) {
+                    fprintf(stderr, "[VT] F:%d $2117=%02X addr:0x%04X->0x%04X pref=%02X\n",
+                            frameCount, value, prevVMADD17, m_vramAddress, m_vramReadBuffer);
+                    va17H++;
+                    // Dump first 16 VRAM bytes when VMADD resets to 0
+                    if (m_vramAddress == 0) {
+                        fprintf(stderr, "[VT] VRAM[0..15].lo:");
+                        for (int di = 0; di < 16; di++) fprintf(stderr, " %02X", m_vram[di*2]);
+                        fprintf(stderr, "\n");
+                    }
+                }
             }
             break;
         }
-            
+
         case 0x2118: { // VMDATAL - VRAM Data Low
-            writeVRAM(m_vramAddress * 2, value);  // Convert word address to byte address
-            // Increment only if VMAIN bit 7 is 0 (increment after low byte)
-            if ((m_vramReadBuffer & 0x80) == 0) {
-                incrementVRAMAddress();
+            // SNES hardware: VRAM writes are blocked during active display (scanlines 1-224)
+            // unless force-blank (INIDISP bit7) is set. Address still increments.
+            {
+              bool activeDisplay = !m_forcedBlank && (m_scanline >= 1 && m_scanline <= 224);
+              uint16_t mw = applyVRAMMapping(m_vramAddress);
+              if (!activeDisplay) {
+                  writeVRAM(mw * 2, value);
+              }
+              // Trace VRAM writes to BG1 tilemap (word 0x2000-0x23FF) and BG4 tilemap (word 0x5000-0x53FF) during Character Test
+              if (frameCount >= 670 && frameCount <= 800) {
+                  bool inBG1map = (mw >= 0x2000 && mw <= 0x23FF);
+                  bool inBG4map = (mw >= 0x5000 && mw <= 0x53FF);
+                  if (inBG1map || inBG4map) {
+                      static int vwMap = 0;
+                      if (vwMap < 500) {
+                          fprintf(stderr, "[VRAM_MAP] F:%d %s word=0x%04X data=%02X blk=%d scan=%d\n",
+                              frameCount, inBG1map ? "BG1" : "BG4", mw, value, (int)activeDisplay, m_scanline);
+                          vwMap++;
+                      }
+                  }
+              }
             }
+            if (!m_vramIncrAfterHigh) incrementVRAMAddress();
             break;
         }
-            
+
         case 0x2119: { // VMDATAH - VRAM Data High
-            writeVRAM(m_vramAddress * 2 + 1, value);  // Convert word address to byte address
-            // Increment only if VMAIN bit 7 is 1 (increment after high byte)
-            if (m_vramReadBuffer & 0x80) {
-                incrementVRAMAddress();
+            // SNES hardware: VRAM writes are blocked during active display unless force-blank
+            {
+              bool activeDisplay = !m_forcedBlank && (m_scanline >= 1 && m_scanline <= 224);
+              uint16_t mw = applyVRAMMapping(m_vramAddress);
+              if (!activeDisplay) {
+                  writeVRAM(mw * 2 + 1, value);
+              }
+              if (frameCount >= 140 && frameCount <= 200 && m_vramAddress < 0x10) {
+                  static int vw19 = 0; if (vw19 < 500) { fprintf(stderr, "[VT] F:%d $2119 word=0x%04X->0x%04X data=%02X blocked=%d\n", frameCount, m_vramAddress, mw, value, (int)activeDisplay); vw19++; }
+              }
             }
+            if (m_vramIncrAfterHigh) incrementVRAMAddress();
             break;
         }
             
@@ -1676,100 +2541,91 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             break;
         }
             
-        case 0x211B: { // M7A - Mode 7 Matrix A (low byte / high byte)
-            if (!m_m7aLatch) {
-                m_m7aPrev = value;
-                m_m7aLatch = true;
-            } else {
-                m_m7a = (int16_t)((value << 8) | m_m7aPrev);
-                m_m7aLatch = false;
-            }
+        case 0x211B: { // M7A - Mode 7 Matrix A
+            // SNES: writes to M7A-M7D use a single shared latch byte
+            // First write = low byte stored in latch; second write = high byte, combine
+            m_m7a = (int16_t)((value << 8) | m_m7Latch);
+            m_m7Latch = value;
             break;
         }
-            
-        case 0x211C: { // M7B - Mode 7 Matrix B (low byte / high byte)
-            if (!m_m7bLatch) {
-                m_m7bPrev = value;
-                m_m7bLatch = true;
-            } else {
-                m_m7b = (int16_t)((value << 8) | m_m7bPrev);
-                m_m7bLatch = false;
-            }
+
+        case 0x211C: { // M7B - Mode 7 Matrix B
+            m_m7b = (int16_t)((value << 8) | m_m7Latch);
+            m_m7Latch = value;
             break;
         }
-            
-        case 0x211D: { // M7C - Mode 7 Matrix C (low byte / high byte)
-            if (!m_m7cLatch) {
-                m_m7cPrev = value;
-                m_m7cLatch = true;
-            } else {
-                m_m7c = (int16_t)((value << 8) | m_m7cPrev);
-                m_m7cLatch = false;
-            }
+
+        case 0x211D: { // M7C - Mode 7 Matrix C
+            m_m7c = (int16_t)((value << 8) | m_m7Latch);
+            m_m7Latch = value;
             break;
         }
-            
-        case 0x211E: { // M7D - Mode 7 Matrix D (low byte / high byte)
-            if (!m_m7dLatch) {
-                m_m7dPrev = value;
-                m_m7dLatch = true;
-            } else {
-                m_m7d = (int16_t)((value << 8) | m_m7dPrev);
-                m_m7dLatch = false;
-            }
+
+        case 0x211E: { // M7D - Mode 7 Matrix D
+            m_m7d = (int16_t)((value << 8) | m_m7Latch);
+            m_m7Latch = value;
             break;
         }
-            
-        case 0x211F: { // M7X - Mode 7 Center X (low byte / high byte)
-            if (!m_m7xLatch) {
-                m_m7xPrev = value;
-                m_m7xLatch = true;
-            } else {
-                m_m7x = (int16_t)((value << 8) | m_m7xPrev);
-                m_m7xLatch = false;
-            }
+
+        case 0x211F: { // M7X - Mode 7 Center X (13-bit signed)
+            // Center registers use same latch but sign-extend to 13 bits
+            int16_t raw = (int16_t)((value << 8) | m_m7Latch);
+            m_m7x = (int16_t)((raw << 3) >> 3);  // sign-extend 13-bit
+            m_m7Latch = value;
             break;
         }
-            
-        case 0x2120: { // M7Y - Mode 7 Center Y (low byte / high byte)
-            if (!m_m7yLatch) {
-                m_m7yPrev = value;
-                m_m7yLatch = true;
-            } else {
-                m_m7y = (int16_t)((value << 8) | m_m7yPrev);
-                m_m7yLatch = false;
-            }
+
+        case 0x2120: { // M7Y - Mode 7 Center Y (13-bit signed)
+            int16_t raw = (int16_t)((value << 8) | m_m7Latch);
+            m_m7y = (int16_t)((raw << 3) >> 3);  // sign-extend 13-bit
+            m_m7Latch = value;
             break;
         }
             
         case 0x2121: { // CGADD - CGRAM Address
-            m_cgramAddress = value;
-            static int cgaddCount = 0;
-            if (cgaddCount < 3) {
-                
-                std::ostringstream oss;
-                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
-                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
-                    << "PPU: CGRAM Address=0x" << std::hex << (int)m_cgramAddress << std::dec << std::endl;
-                Logger::getInstance().logPPU(oss.str());
-                Logger::getInstance().flush();  // Flush at frame end
-                cgaddCount++;
+            // $2121 receives a COLOR INDEX (word address, 0-255).
+            // Internal byte address = colorIndex * 2, because each CGRAM entry is 2 bytes.
+            m_cgramAddress = (uint16_t)value << 1;
+            {
+                static int cgaddCount = 0;
+                if (frameCount >= 173 && frameCount <= 176 && cgaddCount < 100) {
+                    fprintf(stderr, "[CG_A] F:%d $2121=%02X cgramAddr=%03X scan=%d\n",
+                            frameCount, value, (int)m_cgramAddress, m_scanline);
+                    cgaddCount++;
+                } else if (cgaddCount < 3) {
+                    std::ostringstream oss;
+                    oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0')
+                        << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                        << "PPU: CGRAM Address=0x" << std::hex << (int)m_cgramAddress
+                        << " (colorIndex=" << std::dec << (int)value << ")" << std::endl;
+                    Logger::getInstance().logPPU(oss.str());
+                    Logger::getInstance().flush();
+                    cgaddCount++;
+                }
             }
             break;
         }
             
         case 0x2122: { // CGDATA - CGRAM Data
-            writeCGRAM(m_cgramAddress, value);
-            m_cgramAddress++;
-            m_cgramAddress &= 0x01FF;
-            if (m_cgramAddress <= 10) {
-                std::ostringstream oss;
-                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
-                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
-                    << "CGRAM[" << std::dec << (m_cgramAddress - 1) 
-                          << "] = 0x" << std::hex << (int)value << std::dec << std::endl;
-                Logger::getInstance().logPPU(oss.str());
-                Logger::getInstance().flush();  // Flush at frame end
+            // SNES hardware: CGRAM writes are blocked during active display unless force-blank
+            // Address still increments on each write.
+            {
+              bool activeDisplay = !m_forcedBlank && (m_scanline >= 1 && m_scanline <= 224);
+              if (!activeDisplay) {
+                  writeCGRAM(m_cgramAddress, value);
+              }
+              m_cgramAddress++;
+              m_cgramAddress &= 0x01FF;
+              if (m_cgramAddress <= 10) {
+                  std::ostringstream oss;
+                  oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0')
+                      << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
+                      << "CGRAM[" << std::dec << (m_cgramAddress - 1)
+                            << "] = 0x" << std::hex << (int)value
+                            << (activeDisplay ? " (BLOCKED-active)" : "") << std::dec << std::endl;
+                  Logger::getInstance().logPPU(oss.str());
+                  Logger::getInstance().flush();  // Flush at frame end
+              }
             }
             break;
         }
@@ -1778,17 +2634,10 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             m_bg1MapAddr = ((value & 0xFC) << 8) * 2; // Convert word addr to byte addr
             m_bgMapAddr[0] = m_bg1MapAddr; // Sync array
             m_bgMapSize[0] = (value & 0x03); // Bits 0-1: tilemap size
-            static int bg1MapCount = 0;
-            if (bg1MapCount < 3) {
-                std::ostringstream oss;
-                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
-                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
-                    << "PPU: BG1SC=$" << std::hex << (int)value << std::dec 
-                          << " - BG1 Map Addr=0x" << std::hex << m_bg1MapAddr 
-                          << ", Size=" << (m_bgMapSize[0] ? "64x64" : "32x32") << std::dec << std::endl;
-                Logger::getInstance().logPPU(oss.str());
-                Logger::getInstance().flush();  // Flush at frame end
-                bg1MapCount++;
+            // Trace every $2107 write during test frames
+            if (frameCount >= 540 && frameCount <= 570) {
+                fprintf(stderr, "[BG1SC] F:%d scan=%d val=$%02X mapAddr=$%04X\n",
+                    frameCount, m_scanline, value, m_bg1MapAddr);
             }
             break;
         }
@@ -1847,18 +2696,20 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             break;
         }
             
-        case 0x210D: { // BG1HOFS - BG1 Horizontal Scroll (Low)
-            // SNES scroll registers: First write = low byte, second write = high byte
-            // On first write, update low byte. On second write, update high byte and combine.
-            if (m_scrollLatchX) {
-                // Second write: update high byte
-                m_bg1ScrollX = (m_bg1ScrollX & 0x00FF) | (value << 8);
-            } else {
-                // First write: update low byte (but store for next write)
-                m_bg1ScrollX = (m_bg1ScrollX & 0xFF00) | value;
+        case 0x210D: { // BG1HOFS / M7HOFS - BG1 Horizontal Scroll (also Mode 7 HOFS)
+            // SNES scroll write protocol: two consecutive writes set the 10-bit value
+            // First write:  value goes into bits[7:0]; latch = value
+            // bsnes formula: scroll = (data << 8) | (latch & ~7) | (scroll >> 8 & 7)
+            // The latch is a single shared PPU latch (written by any BG scroll register)
+            {
+                m_bg1ScrollX = (value << 8) | (m_scrollPrevX & ~7) | ((m_bg1ScrollX >> 8) & 7);
+                // Mode 7 HOFS (13-bit signed): = ((value << 8) | prev) sign-extended from 13
+                int m7h = ((int)value << 8) | (int)m_m7hofs_prev;
+                m7h = (m7h << 19) >> 19;  // sign-extend 13-bit (shift 32-13=19)
+                m_m7hofs = (int16_t)m7h;
+                m_m7hofs_prev = value;
+                m_scrollPrevX = value;
             }
-            m_scrollPrevX = value;
-            m_scrollLatchX = !m_scrollLatchX;
             static int bg1HofsCount = 0;
             if (bg1HofsCount < 3) {
                 std::cout << "PPU: BG1HOFS=$" << std::hex << (int)value << ", ScrollX=0x" << m_bg1ScrollX << std::dec << std::endl;
@@ -1866,129 +2717,105 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             }
             break;
         }
-            
-        case 0x210E: { // BG1VOFS - BG1 Vertical Scroll (Low)
-            // BG1VOFS is 10-bit (0-1023)
-            if (m_scrollLatchY) {
-                m_bg1ScrollY = (m_bg1ScrollY & 0x00FF) | ((value & 0x03) << 8);
-            } else {
-                m_bg1ScrollY = (m_bg1ScrollY & 0xFF00) | value;
-            }
-            m_bg1ScrollY &= 0x03FF;  // Mask to 10-bit
+
+        case 0x210E: { // BG1VOFS / M7VOFS - BG1 Vertical Scroll (also Mode 7 VOFS)
+            // bsnes formula: scroll = (data << 8) | latch
+            m_bg1ScrollY = (value << 8) | m_scrollPrevY;
+            // Mode 7 VOFS (13-bit signed)
+            int m7v = ((int)value << 8) | (int)m_m7vofs_prev;
+            m7v = (m7v << 19) >> 19;  // sign-extend 13-bit
+            m_m7vofs = (int16_t)m7v;
+            m_m7vofs_prev = value;
             m_scrollPrevY = value;
-            m_scrollLatchY = !m_scrollLatchY;
             break;
         }
             
-        case 0x210F: { // BG2HOFS - BG2 Horizontal Scroll (Low)
-            if (m_scrollLatchX) {
-                m_bg2ScrollX = (m_bg2ScrollX & 0x00FF) | (value << 8);
-            } else {
-                m_bg2ScrollX = (m_bg2ScrollX & 0xFF00) | value;
-            }
+        case 0x210F: { // BG2HOFS - BG2 Horizontal Scroll
+            // bsnes formula: scroll = (data << 8) | (latch & ~7) | (scroll >> 8 & 7)
+            m_bg2ScrollX = (value << 8) | (m_scrollPrevX & ~7) | ((m_bg2ScrollX >> 8) & 7);
             m_scrollPrevX = value;
-            m_scrollLatchX = !m_scrollLatchX;
             break;
         }
-            
-        case 0x2110: { // BG2VOFS - BG2 Vertical Scroll (Low)
-            if (m_scrollLatchY) {
-                m_bg2ScrollY = (m_bg2ScrollY & 0x00FF) | (value << 8);
-            } else {
-                m_bg2ScrollY = (m_bg2ScrollY & 0xFF00) | value;
-            }
+
+        case 0x2110: { // BG2VOFS - BG2 Vertical Scroll
+            // bsnes formula: scroll = (data << 8) | latch
+            m_bg2ScrollY = (value << 8) | m_scrollPrevY;
             m_scrollPrevY = value;
-            m_scrollLatchY = !m_scrollLatchY;
             break;
         }
-            
-        case 0x2111: { // BG3HOFS - BG3 Horizontal Scroll (Low)
-            if (m_scrollLatchX) {
-                m_bg3ScrollX = (m_bg3ScrollX & 0x00FF) | (value << 8);
-            } else {
-                m_bg3ScrollX = (m_bg3ScrollX & 0xFF00) | value;
-            }
+
+        case 0x2111: { // BG3HOFS - BG3 Horizontal Scroll
+            m_bg3ScrollX = (value << 8) | (m_scrollPrevX & ~7) | ((m_bg3ScrollX >> 8) & 7);
             m_scrollPrevX = value;
-            m_scrollLatchX = !m_scrollLatchX;
             break;
         }
-            
-        case 0x2112: { // BG3VOFS - BG3 Vertical Scroll (Low)
-            if (m_scrollLatchY) {
-                m_bg3ScrollY = (m_bg3ScrollY & 0x00FF) | (value << 8);
-            } else {
-                m_bg3ScrollY = (m_bg3ScrollY & 0xFF00) | value;
-            }
+
+        case 0x2112: { // BG3VOFS - BG3 Vertical Scroll
+            m_bg3ScrollY = (value << 8) | m_scrollPrevY;
             m_scrollPrevY = value;
-            m_scrollLatchY = !m_scrollLatchY;
             break;
         }
-            
-        case 0x2113: { // BG4HOFS - BG4 Horizontal Scroll (Low)
-            if (m_scrollLatchX) {
-                m_bg4ScrollX = (m_bg4ScrollX & 0x00FF) | (value << 8);
-            } else {
-                m_bg4ScrollX = (m_bg4ScrollX & 0xFF00) | value;
-            }
+
+        case 0x2113: { // BG4HOFS - BG4 Horizontal Scroll
+            m_bg4ScrollX = (value << 8) | (m_scrollPrevX & ~7) | ((m_bg4ScrollX >> 8) & 7);
             m_scrollPrevX = value;
-            m_scrollLatchX = !m_scrollLatchX;
             break;
         }
-            
-        case 0x2114: { // BG4VOFS - BG4 Vertical Scroll (Low)
-            if (m_scrollLatchY) {
-                m_bg4ScrollY = (m_bg4ScrollY & 0x00FF) | (value << 8);
-            } else {
-                m_bg4ScrollY = (m_bg4ScrollY & 0xFF00) | value;
-            }
+
+        case 0x2114: { // BG4VOFS - BG4 Vertical Scroll
+            m_bg4ScrollY = (value << 8) | m_scrollPrevY;
             m_scrollPrevY = value;
-            m_scrollLatchY = !m_scrollLatchY;
             break;
         }
             
         case 0x2115: { // VMAIN - VRAM Address Increment Mode
             m_vramIncrement = value & 0x03;  // Bits 0-1: increment size (00=1, 01=32, 10/11=128)
             m_vramMapping = (value >> 2) & 0x03;  // Bits 2-3: address mapping
-            m_vramReadBuffer = value;  // Store full value including bit 7 (increment timing)
-            static int vmainCount = 0;
-            if (vmainCount < 5) {
-                std::cout << "PPU: VMAIN=$" << std::hex << (int)value << std::dec 
-                          << " - Inc size=" << (m_vramIncrement == 0 ? 1 : (m_vramIncrement == 1 ? 32 : 128))
-                          << ", Inc after " << ((value & 0x80) ? "high" : "low") << " byte" << std::endl;
-                vmainCount++;
+            m_vramIncrAfterHigh = (value & 0x80) != 0;  // bit7: increment timing
+            if (frameCount >= 130 && frameCount <= 175) {
+                static int vmainTrace = 0;
+                if (vmainTrace < 200) {
+                    fprintf(stderr, "[VT] F:%d $2115=%02X inc=%d map=%d afterH=%d\n",
+                            frameCount, value,
+                            m_vramIncrement == 0 ? 1 : m_vramIncrement == 1 ? 32 : 128,
+                            m_vramMapping, m_vramIncrAfterHigh ? 1 : 0);
+                    vmainTrace++;
+                }
             }
             break;
         }
             
-        case 0x2102: // OAMADDL - OAM Address (low byte)
-            m_oamAddress = (m_oamAddress & 0xFF00) | value;
+        case 0x2102: { // OAMADDL - OAM Address low byte
+            // OAMADDL = bits[7:0] of OAM WORD address.
+            // Internal byte address = word_address * 2.
+            // We store byte address in m_oamAddress (0-543).
+            // Preserve bit9 (from OAMADDH) and replace low 8 word-addr bits → byte bits [8:1].
+            m_oamAddress = (m_oamAddress & 0x0200) | ((uint16_t)value << 1);
             break;
-            
-        case 0x2103: // OAMADDH - OAM Address (high byte)
-            m_oamAddress = (m_oamAddress & 0x00FF) | (value << 8);
+        }
+
+        case 0x2103: { // OAMADDH - OAM Address high bit + priority rotation
+            // Bit 0: MSB of OAM word address → byte address bit 9 (= 512).
+            // Bit 7: OAM priority rotation enable (not implemented).
+            // $2102 sets bits[8:1] of the byte address (low 8 bits of word addr << 1).
+            // $2103 bit0 is word-address bit 8, which maps to byte-address bit 9 (<<9).
+            // Preserve low 9 bits from $2102 write, replace bit 9 from $2103 bit 0.
+            m_oamAddress = (m_oamAddress & 0x01FF) | (((uint16_t)value & 0x01) << 9);
             break;
-            
-        case 0x2104: // OAMDATA - OAM Data Write
-            writeOAM(m_oamAddress++, value);
-            m_oamAddress &= 0x01FF; // OAM is 512 bytes
+        }
+
+        case 0x2104: { // OAMDATA - OAM Data Write
+            writeOAM(m_oamAddress, value);
+            m_oamAddress++;
+            if (m_oamAddress >= 544) m_oamAddress = 0; // OAM is 544 bytes (0x000-0x21F)
             break;
-            
+        }
+
         case 0x212C: { // TM - Main Screen Designation
             m_mainScreenDesignation = value;
-            static int tmCount = 0;
-            if (tmCount < 20) {
-                std::ostringstream oss;
-                oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') 
-                    << (m_cpu ? m_cpu->getCycles() : 0) << " F:" << std::setw(4) << std::setfill('0') << frameCount << "] "
-                    << "PPU: TM (Main Screen)=$" << std::hex << (int)value << std::dec 
-                    << " (BG1=" << ((value & 0x01) ? "ON" : "OFF")
-                    << ", BG2=" << ((value & 0x02) ? "ON" : "OFF")
-                    << ", BG3=" << ((value & 0x04) ? "ON" : "OFF")
-                    << ", BG4=" << ((value & 0x08) ? "ON" : "OFF") << ")" << std::endl;
-                Logger::getInstance().logPPU(oss.str());
-                Logger::getInstance().flush();
-                std::cout << oss.str();
-                tmCount++;
+            // Trace TM writes during test frames
+            if (frameCount >= 540 && frameCount <= 570) {
+                fprintf(stderr, "[TM] F:%d scan=%d val=$%02X\n", frameCount, m_scanline, value);
             }
             break;
         }
@@ -2000,10 +2827,6 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             
         case 0x2123: // W12SEL - Window Mask Settings for BG1 and BG2
             m_w12sel = value;
-            if (!warnedWindow) {
-                std::cout << "[WARN] Window Masking (W12SEL/W34SEL/WOBJSEL) not implemented - only registers are stored, actual masking does not work." << std::endl;
-                warnedWindow = true;
-            }
             break;
             
         case 0x2124: // W34SEL - Window Mask Settings for BG3 and BG4
@@ -2058,9 +2881,18 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             m_cgadsub = value;
             break;
             
-        case 0x2132: // COLDATA - Fixed Color Data
-            // Store for potential future use; currently not implemented
+        case 0x2132: { // COLDATA - Fixed Color Data
+            // Bits [4:0] = 5-bit color intensity
+            // Bit  [5]   = apply to Blue
+            // Bit  [6]   = apply to Green
+            // Bit  [7]   = apply to Red
+            m_coldata = value;
+            uint8_t intensity = value & 0x1F;
+            if (value & 0x80) m_coldataR = intensity;
+            if (value & 0x40) m_coldataG = intensity;
+            if (value & 0x20) m_coldataB = intensity;
             break;
+        }
             
         case 0x2133: { // SETINI - Screen Mode/Video Select
             m_setini = value;
@@ -2088,125 +2920,213 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
 }
 
 uint8_t PPU::readRegister(uint16_t address) {
+    uint8_t regResult = readRegisterImpl(address);
+    // Diagnostic: log specific PPU reads during Electronics Test frames
+    if (frameCount >= 130 && frameCount <= 210) {
+        // Log H/V counter latch and status registers
+        if (address == 0x2137 || address == 0x213C || address == 0x213D ||
+            address == 0x213E || address == 0x213F) {
+            static int hvLogCount = 0;
+            if (hvLogCount < 15000) {
+                fprintf(stderr, "[PPU_R] F:%d $%04X=%02X scan=%d dot=%d\n",
+                        frameCount, address, regResult, m_scanline, m_dot);
+                hvLogCount++;
+            }
+        }
+    }
+    return regResult;
+}
+
+void PPU::triggerHVLatch() {
+    // On real SNES hardware the auto-joypad process pulses the /LATCH pin at VBlank start,
+    // which has the same effect as a software read of $2137: latches H/V counters and
+    // sets the latch flag (bit7 of $213F / STAT78).
+    m_latchedH = m_dot;
+    m_latchedV = m_scanline;
+    m_hvLatchRead = true;   // bit7 of $213F will return 1 until next $213F read
+    m_hvLatchHRead = false; // reset $213C/$213D byte-select flip-flops
+    m_hvLatchVRead = false;
+}
+
+uint8_t PPU::readRegisterImpl(uint16_t address) {
     switch (address) {
         case 0x2137: { // SLHV - Software Latch for H/V Counter
-            // Latch current H/V counter values
+            // Reading $2137 latches H/V counters AND sets bit7 of $213F (latch flag)
             m_latchedH = m_dot;
             m_latchedV = m_scanline;
-            m_hvLatchRead = false;
-            m_hvLatchHRead = false;
+            m_hvLatchRead = true;    // SET flag: latch occurred (bit7 of $213F)
+            m_hvLatchHRead = false;  // reset read toggles for fresh $213C/$213D reads
             m_hvLatchVRead = false;
             return 0;
         }
-            
+
         case 0x213C: { // OPHCT - Horizontal Counter (Low/High)
-            // First read: return low byte of latched horizontal counter
-            // Second read: return high byte (bit 8 only)
+            // First read: return low byte; second read: return bit 8
+            // Does NOT affect the latch flag ($213F bit7)
             if (!m_hvLatchHRead) {
-                // First read: return low byte
                 m_hvLatchHRead = true;
-                m_hvLatchRead = true;
                 return m_latchedH & 0xFF;
             } else {
-                // Second read: return high byte (bit 8 only)
                 m_hvLatchHRead = false;
                 return (m_latchedH >> 8) & 0x01;
             }
         }
-        
+
         case 0x213D: { // OPVCT - Vertical Counter (Low/High)
-            // First read: return low byte of latched vertical counter
-            // Second read: return high byte (bit 8 only)
+            // First read: return low byte; second read: return bit 8
+            // Does NOT affect the latch flag ($213F bit7)
             if (!m_hvLatchVRead) {
-                // First read: return low byte
                 m_hvLatchVRead = true;
-                m_hvLatchRead = true;
                 return m_latchedV & 0xFF;
             } else {
-                // Second read: return high byte (bit 8 only)
                 m_hvLatchVRead = false;
                 return (m_latchedV >> 8) & 0x01;
             }
         }
         
-        case 0x213E: { // OPHCTH/OPVCTH - H/V Counter High (alternate read)
-            // This is read after $213C or $213D
-            // Return high byte of the last read counter
-            // If H was last read, return H high byte
-            // If V was last read, return V high byte
-            if (m_hvLatchHRead) {
-                // H was last read, return H high byte
-                m_hvLatchHRead = false;
-                return (m_latchedH >> 8) & 0x01;
-            } else if (m_hvLatchVRead) {
-                // V was last read, return V high byte
-                m_hvLatchVRead = false;
-                return (m_latchedV >> 8) & 0x01;
-            }
-            return 0;
+        case 0x2134: // MPYL - Mode 7 multiply result low byte
+        case 0x2135: // MPYM - Mode 7 multiply result mid byte
+        case 0x2136: { // MPYH - Mode 7 multiply result high byte
+            // Result = (int16_t)M7A * (int8_t)(M7B & 0xFF), 24-bit signed
+            int32_t product = (int32_t)(int16_t)m_m7a * (int32_t)(int8_t)(m_m7b & 0xFF);
+            if (address == 0x2134) return (uint8_t)(product & 0xFF);
+            if (address == 0x2135) return (uint8_t)((product >> 8) & 0xFF);
+            return (uint8_t)((product >> 16) & 0xFF);
         }
-            
-        case 0x213F: { // STAT78 - PPU Status Flag and Version
-            // Bit 0: PPU version (0 = version 1, 1 = version 2)
-            // Bit 6: Interlace field (0 = odd field, 1 = even field)
-            // Bit 7: PPU2 latch flag (0 = not latched, 1 = latched)
-            uint8_t result = 0x01; // Version 1, odd field, not latched
-            // If H/V latch was just read, set bit 7
-            if (m_hvLatchRead) {
-                result |= 0x80;
+
+        case 0x2138: { // OAMDATAREAD - OAM Read
+            uint8_t result = (m_oamAddress < (uint16_t)m_oam.size()) ? m_oam[m_oamAddress] : 0;
+            m_oamAddress++;
+            if (m_oamAddress >= 544) m_oamAddress = 0;
+            return result;
+        }
+
+        case 0x213B: { // CGDATAREAD - CGRAM Read
+            uint8_t result = (m_cgramAddress < (uint16_t)m_cgram.size()) ? m_cgram[m_cgramAddress] : 0;
+            {
+                static int cgRdLog = 0;
+                // Log F:174 CGRAM reads for addresses 0x100+ (where DMA wrote) or near test failure
+                if (frameCount == 174 && m_scanline >= 115 && cgRdLog < 600) {
+                    fprintf(stderr, "[CG_R] F:%d $213B addr=%03X data=%02X scan=%d\n",
+                            frameCount, (int)m_cgramAddress, result, m_scanline);
+                    cgRdLog++;
+                }
             }
+            m_cgramAddress = (m_cgramAddress + 1) & 0x01FF;
+            return result;
+        }
+
+        case 0x213E: { // STAT77 - PPU1 Status and Version
+            // Bit 7: Time Over  (sprite pixel rendering budget exceeded, >272px)
+            // Bit 6: Range Over (>32 sprites on a scanline)
+            // Bits 3-0: PPU1 version (1 on most hardware)
+            uint8_t stat = 0x01;
+            if (m_timeOver)  stat |= 0x80;  // Bit 7 = Time Over
+            if (m_rangeOver) stat |= 0x40;  // Bit 6 = Range Over
+            // SNES hardware: reading $213E clears overflow flags
+            m_timeOver  = false;
+            m_rangeOver = false;
+            fprintf(stderr, "[STAT77] F:%d SL:%d STAT=$%02X (TO=%d RO=%d) oam[0..3]=%02X %02X %02X %02X oam[4..7]=%02X %02X %02X %02X\n",
+                frameCount, m_scanline, stat,
+                (stat>>7)&1, (stat>>6)&1,
+                m_oam.size()>0 ? m_oam[0] : 0xFF,
+                m_oam.size()>1 ? m_oam[1] : 0xFF,
+                m_oam.size()>2 ? m_oam[2] : 0xFF,
+                m_oam.size()>3 ? m_oam[3] : 0xFF,
+                m_oam.size()>4 ? m_oam[4] : 0xFF,
+                m_oam.size()>5 ? m_oam[5] : 0xFF,
+                m_oam.size()>6 ? m_oam[6] : 0xFF,
+                m_oam.size()>7 ? m_oam[7] : 0xFF);
+            // Also dump high table (OAM[512-543]) when overflow is present
+            if (stat & 0xC0) {
+                fprintf(stderr, "[STAT77] HIGH TABLE: ");
+                for (int hti = 512; hti < 544 && hti < (int)m_oam.size(); hti++) {
+                    fprintf(stderr, "%02X ", m_oam[hti]);
+                }
+                fprintf(stderr, "\n");
+                // Also dump sprite 4-7 OAM low table bytes
+                fprintf(stderr, "[STAT77] SPR4-7: ");
+                for (int si = 16; si < 32 && si < (int)m_oam.size(); si++) {
+                    fprintf(stderr, "%02X ", m_oam[si]);
+                }
+                fprintf(stderr, "\n");
+            }
+            return stat;
+        }
+
+        case 0x213F: { // STAT78 - PPU2 Status and Version
+            // Bit 7: FIELD - interlace field (toggles each VBlank when $2133 bit0=INTERLACE is set)
+            // Bit 6: External latch flag (set by $2137 read or /LATCH pin); cleared on read
+            // Bits 3-0: PPU2 version (3 on most hardware)
+            // NOTE: Reading $213F also resets the $213C/$213D byte-select flip-flops
+            // (same effect as reading $2137 on the toggle bits, per hardware behaviour)
+            uint8_t result = 0x03; // Version 3
+            if (m_fieldBit)    result |= 0x80; // Bit 7: interlace field (FIELD)
+            if (m_hvLatchRead) result |= 0x40; // Bit 6: latch flag (cleared on read)
+            m_hvLatchRead  = false; // clear latch flag on read
+            m_hvLatchHRead = false; // reset $213C byte-select toggle
+            m_hvLatchVRead = false; // reset $213D byte-select toggle
             return result;
         }
             
         case 0x2139: { // VMDATALREAD - VRAM Data Read (low byte)
-            // VRAM read has a prefetch buffer - first read loads buffer, subsequent reads return buffered value
+            // Return prefetched low byte; if afterH=0 (trigger=low): refetch from CURRENT addr, then increment
             uint8_t result = m_vramReadBuffer;
-            m_vramReadBuffer = readVRAM(m_vramAddress * 2);
-            // Increment after low byte read if bit 7 of VMAIN is 0
-            if ((m_vramReadBuffer & 0x80) == 0) {
+            if (!m_vramIncrAfterHigh) {
+                // SNES hardware: refetch MDR from CURRENT address first, then increment
+                uint16_t m = applyVRAMMapping(m_vramAddress);
+                m_vramReadBuffer  = readVRAM(m * 2);
+                m_vramReadBufferH = readVRAM(m * 2 + 1);
                 uint16_t inc = (m_vramIncrement == 0) ? 1 : (m_vramIncrement == 1) ? 32 : 128;
                 m_vramAddress += inc;
             }
+            // afterH=1: NO increment, NO refill - return cached prefetch only
             return result;
         }
-            
+
         case 0x213A: { // VMDATAHREAD - VRAM Data Read (high byte)
-            uint8_t result = readVRAM(m_vramAddress * 2 + 1);
-            // Increment after high byte read if bit 7 of VMAIN is 1
-            if ((m_vramReadBuffer & 0x80) != 0) {
+            // Return prefetched high byte; if afterH=1 (trigger=high): refetch from CURRENT addr, then increment
+            uint8_t result = m_vramReadBufferH;
+            if (m_vramIncrAfterHigh) {
+                // SNES hardware: refetch MDR from CURRENT address first, then increment
+                uint16_t m2 = applyVRAMMapping(m_vramAddress);
+                m_vramReadBuffer  = readVRAM(m2 * 2);
+                m_vramReadBufferH = readVRAM(m2 * 2 + 1);
                 uint16_t inc = (m_vramIncrement == 0) ? 1 : (m_vramIncrement == 1) ? 32 : 128;
                 m_vramAddress += inc;
             }
+            // afterH=0: NO increment, NO refill - return cached prefetch only
             return result;
         }
             
+        case 0x4211: { // TIMEUP - H/V IRQ Flag
+            // Bit 7: IRQ pending flag (set when H/V timer fires, cleared on read)
+            uint8_t result = m_irqFlag ? 0x80 : 0x00;
+            m_irqFlag = false;  // Clear on read
+            return result;
+        }
+
         case 0x4210: { // RDNMI - NMI Flag and Version
-            // Bit 7: NMI flag (cleared on read)
+            // Bit 7: NMI flag (cleared on read - SNES hardware behavior)
             // Bits 0-3: CPU version
             uint8_t result = 0x02;  // CPU version 2
-            
-            // SNES RDNMI behavior:
-            // - Bit 7 is set when VBlank occurs (scanline 225)
-            // - Reading RDNMI clears the flag, BUT:
-            //   - If we're still in VBlank period (scanlines 225-261), bit 7 should remain set
-            //   - This allows wait loops to detect VBlank period
-            // - The flag is cleared when VBlank ends (scanline >= 262)
-            
-            bool inVBlank = (m_scanline >= 225 && m_scanline < 262);
-            
-            // Set bit 7 if we're in VBlank period OR if the flag was previously set
-            // The flag persists during the entire VBlank period even after reads
-            if (inVBlank || m_nmiFlag) {
+
+            // SNES RDNMI hardware behavior:
+            // - Bit 7 is set ONCE when VBlank starts (scanline 225)
+            // - Bit 7 is automatically cleared after reading $4210
+            // - This means polling $4210 twice during same VBlank: 1st read = 0x82, 2nd read = 0x02
+            // - Flag is also cleared at frame start (redundant safety)
+            // - This allows wait-for-VBlank loops to work correctly across frame boundaries
+
+            if (m_nmiFlag) {
                 result |= 0x80;
-            }
-            
-            // RDNMI read logging removed to reduce log spam
-            // VBlank state changes are logged in cpu.cpp via RDNMI-VBLANK and RDNMI-VBLANK-END
-            
-            // Clear the stored flag on read ONLY if we're outside VBlank period
-            // If we're still in VBlank, keep the flag set so subsequent reads also return bit 7 = 1
-            if (!inVBlank) {
-                m_nmiFlag = false;
+                m_nmiFlag = false;  // Clear on read (hardware auto-clears)
+                static int rdnmiClearCount = 0;
+                if (rdnmiClearCount < 20) {
+                    fprintf(stderr, "[RDNMI-CLEAR] F:%d scan=%d → $82 cleared (NMI ack)\n",
+                        frameCount, m_scanline);
+                    rdnmiClearCount++;
+                }
             }
             // Record to history ring buffer
             m_rdnmiHistory[m_rdnmiHistoryIndex] = result;
@@ -2363,15 +3283,34 @@ uint8_t PPU::readVRAM(uint16_t address) {
     return 0;
 }
 
-void PPU::writeCGRAM(uint8_t address, uint8_t value) {
+void PPU::writeCGRAM(uint16_t address, uint8_t value) {
+    // address is a byte address (0-511); each CGRAM color entry is 2 bytes
     if (address < m_cgram.size()) {
         m_cgram[address] = value;
     }
 }
 
 void PPU::writeOAM(uint16_t address, uint8_t value) {
-    if (address < m_oam.size()) {
-        m_oam[address] = value;
+    if (address >= 0x0200) {
+        // High table (0x0200-0x021F): single-byte writes, no latch
+        if (address < (uint16_t)m_oam.size()) {
+            m_oam[address] = value;
+        }
+    } else {
+        // Low table (0x0000-0x01FF): write-twice latch
+        if (!(address & 1)) {
+            // Even address: buffer in latch, don't write yet
+            m_oamLatchByte  = value;
+            m_oamLatchValid = true;
+        } else {
+            // Odd address: commit latched even byte + this odd byte
+            uint16_t evenAddr = address & ~1u;
+            if (evenAddr < (uint16_t)m_oam.size())
+                m_oam[evenAddr] = m_oamLatchByte;
+            if (address < (uint16_t)m_oam.size())
+                m_oam[address] = value;
+            m_oamLatchValid = false;
+        }
     }
 }
 
@@ -2480,115 +3419,144 @@ void PPU::decode8bpp(const uint8_t* tileData, uint8_t output[8][8]) {
     }
 }
 
+// ============================================================
+// Sprite rendering — full SNES OAM implementation
+// OAM layout:
+//   [0..511]  = 128 sprites × 4 bytes: X(8), Y(8), tile(8), attr(8)
+//     attr byte: [7]=vflip [6]=hflip [5:4]=priority [3]=name_table [2:0]=palette
+//   [512..543] = 32 bytes of extended data: 4 sprites per byte
+//     bits [1:0] = sprite 4i+0: [1]=size [0]=X bit8
+//     bits [3:2] = sprite 4i+1: [3]=size [2]=X bit8
+//     bits [5:4] = sprite 4i+2: [5]=size [4]=X bit8
+//     bits [7:6] = sprite 4i+3: [7]=size [6]=X bit8
+//
+// OBSEL ($2101):
+//   bits [2:0] = name base (sprite base tile address = bits * 0x2000 / 2 words)
+//               (name base selects which 4KB block in VRAM for name table 0)
+//   bits [4:3] = name select (gap between name table 0 and 1, in units of 0x1000 words)
+//   bits [7:5] = size select (0=8/16, 1=8/32, 2=8/64, 3=16/32, 4=16/64, 5=32/64)
+//
+// Sprite sizes (small/large):
+//   0: 8x8  / 16x16
+//   1: 8x8  / 32x32
+//   2: 8x8  / 64x64
+//   3: 16x16/ 32x32
+//   4: 16x16/ 64x64
+//   5: 32x32/ 64x64
+// ============================================================
 uint32_t PPU::renderSprites(int x, int y) {
-    // SNES OAM (Object Attribute Memory) structure:
-    // Each sprite is 4 bytes: X, Y, Tile, Attributes
-    // 128 sprites maximum, 32 sprites per scanline maximum
-    
-    // Extract sprite size settings from OBSEL register
-    uint8_t spriteSize = (m_objSize >> 5) & 0x03; // Bits 5-6
-    uint8_t nameBase = (m_objSize & 0x07) << 12;  // Bits 0-2, shifted to get base address
-    
-    // Determine sprite dimensions based on size setting
-    int spriteWidth, spriteHeight;
-    switch (spriteSize) {
-        case 0: spriteWidth = 8;  spriteHeight = 8;  break;  // Small
-        case 1: spriteWidth = 8;  spriteHeight = 16; break;  // Small + Large
-        case 2: spriteWidth = 8;  spriteHeight = 32; break;  // Small + Large + Large
-        case 3: spriteWidth = 16; spriteHeight = 32; break;  // Large + Large + Large
-        default: spriteWidth = 8; spriteHeight = 8; break;
-    }
-    
-    // Check all sprites to see if any are at this pixel position
-    for (int sprite = 0; sprite < 128; sprite++) {
-        int oamAddr = sprite * 4;
-        
-        if (oamAddr + 3 >= m_oam.size()) continue;
-        
-        // Read sprite data
-        uint8_t spriteX = m_oam[oamAddr];
-        uint8_t spriteY = m_oam[oamAddr + 1];
-        uint8_t tileNumber = m_oam[oamAddr + 2];
-        uint8_t attributes = m_oam[oamAddr + 3];
-        
-        // Skip if sprite is not visible (Y = 0 or Y > 224)
-        if (spriteY == 0 || spriteY > 224) continue;
-        
-        // Check if sprite is on this scanline
-        if (y >= spriteY && y < spriteY + spriteHeight) {
-            // Check if sprite is at this X position
-            if (x >= spriteX && x < spriteX + spriteWidth) {
-                // Calculate pixel position within sprite
-                int pixelX = x - spriteX;
-                int pixelY = y - spriteY;
-                
-                // Apply horizontal flip if needed
-                if (attributes & 0x40) {
-                    pixelX = spriteWidth - 1 - pixelX;
-                }
-                
-                // Apply vertical flip if needed
-                if (attributes & 0x80) {
-                    pixelY = spriteHeight - 1 - pixelY;
-                }
-                
-                // Calculate tile number based on sprite size
-                int tileX = pixelX / 8;
-                int tileY = pixelY / 8;
-                int tilePixelX = pixelX % 8;
-                int tilePixelY = pixelY % 8;
-                
-                // Calculate actual tile number for multi-tile sprites
-                uint16_t actualTileNumber = tileNumber;
-                if (spriteWidth > 8) {
-                    actualTileNumber += tileX;
-                }
-                if (spriteHeight > 8) {
-                    actualTileNumber += tileY * (spriteWidth / 8);
-                }
-                
-                // Get tile data address using name base
-                uint16_t tileAddr = nameBase + actualTileNumber * 32; // 32 bytes per 8x8 tile
-                
-                if (tileAddr + 32 <= m_vram.size()) {
-                    // Decode tile
-                    uint8_t tileData[32];
-                    for (int i = 0; i < 32; i++) {
-                        tileData[i] = m_vram[tileAddr + i];
-                    }
-                    
-                    uint8_t pixels[64];
-                    decodeTile(tileData, pixels, 4);
-                    
-                    uint8_t pixelIndex = pixels[tilePixelY * 8 + tilePixelX];
-                    if (pixelIndex != 0) { // Not transparent
-                        // Use palette 8-15 for sprites (palette 0-7 are for backgrounds)
-                        uint8_t palette = 8 + ((attributes >> 1) & 0x07);
-                        return getColor(palette, pixelIndex);
-                    }
-                }
-            }
-        }
-    }
-    
-    return 0; // No sprite pixel at this position
+    // Delegated to renderSpritePixel — kept for API compatibility
+    PixelInfo p = renderSpritePixel(x, y);
+    return p.color;
 }
 
-// Render sprite pixel with priority information
 PixelInfo PPU::renderSpritePixel(int x, int y) {
-    // SNES OAM structure and extended OAM
-    // Each sprite has priority information in extended OAM
-    // For now, return priority 2 for sprites (between BG priorities)
-    
-    uint32_t spriteColor = renderSprites(x, y);
-    if (spriteColor != 0) {
-        // Sprites typically have priority 2-3
-        // Priority is determined by sprite number (lower number = higher priority)
-        // and extended OAM attributes
-        return {spriteColor, 2}; // Default sprite priority
+    // ---- Decode OBSEL ($2101) ----
+    // Name base: bits[2:0] → word address = bits << 13, byte address = bits << 14
+    // (per bsnes/ares: tiledataAddress = data.bit(0,2) << 13)
+    uint32_t nameBase0 = (uint32_t)(m_objSize & 0x07) << 14;  // byte address of name table 0
+    // Name select: bits[4:3] → gap between name table 0 and 1 = (nameSelect+1) << 13 words
+    uint8_t nameSelect = (m_objSize >> 3) & 0x03;
+    uint32_t nameBase1 = nameBase0 + (uint32_t)(nameSelect + 1) * 0x4000; // byte address of name table 1
+
+    // Size select: bits[7:5]
+    uint8_t sizeMode = (m_objSize >> 5) & 0x07;
+    // small/large widths and heights
+    static const int smallW[6] = {8, 8, 8, 16, 16, 32};
+    static const int smallH[6] = {8, 8, 8, 16, 16, 32};
+    static const int largeW[6] = {16, 32, 64, 32, 64, 64};
+    static const int largeH[6] = {16, 32, 64, 32, 64, 64};
+    if (sizeMode > 5) sizeMode = 0;
+
+    // Iterate sprites from 0..127 (sprite 0 has highest priority)
+    // SNES: first visible sprite wins per pixel (with same-priority sprite in OAM order)
+    for (int s = 0; s < 128; s++) {
+        int oamBase = s * 4;
+        if (oamBase + 3 >= (int)m_oam.size()) break;
+
+        uint8_t attr   = m_oam[oamBase + 3];
+        uint8_t tileN  = m_oam[oamBase + 2];
+        uint8_t spY    = m_oam[oamBase + 1];
+        uint8_t spXlow = m_oam[oamBase + 0];
+
+        // Extended OAM byte index: byte 512 + s/4, bit pair s%4*2
+        int extIdx  = 512 + (s / 4);
+        int extShift = (s % 4) * 2;
+        uint8_t extBits = 0;
+        if (extIdx < (int)m_oam.size()) {
+            extBits = (m_oam[extIdx] >> extShift) & 0x03;
+        }
+        bool isLarge  = (extBits >> 1) & 1;
+        bool xBit8    = (extBits >> 0) & 1;
+
+        // Full 9-bit signed X position
+        int sprX = (int)spXlow | ((int)xBit8 << 8);
+        if (sprX >= 256) sprX -= 512;  // sign-extend: 0x100..0x1FF → -256..-1
+
+        // Sprite dimensions
+        int sw = isLarge ? largeW[sizeMode] : smallW[sizeMode];
+        int sh = isLarge ? largeH[sizeMode] : smallH[sizeMode];
+
+        // SNES sprite Y formula: lineOffset = (scanline - spY) & 0xFF
+        // Sprite is on this scanline if lineOffset < height
+        int lineOffset = (y - (int)spY) & 0xFF;
+        if (lineOffset >= sh) continue;
+
+        // Check if pixel x is within the sprite's horizontal range
+        if (x < sprX || x >= sprX + sw) continue;
+
+        // Pixel offset within sprite
+        int px = x - sprX;
+        int py = lineOffset;
+
+        // OAM byte 3 attribute layout (per bsnes/ares):
+        //   bit 0: name select (selects name table 0 or 1)
+        //   bits 1-3: palette (0-7, selects from 8 sprite palettes)
+        //   bits 4-5: priority (0-3)
+        //   bit 6: horizontal flip
+        //   bit 7: vertical flip
+        bool nameTableBit = attr & 0x01;
+        bool hFlip = (attr >> 6) & 1;
+        bool vFlip = (attr >> 7) & 1;
+
+        if (hFlip) px = sw - 1 - px;
+        if (vFlip) py = sh - 1 - py;
+
+        // Which 8x8 sub-tile are we in?
+        int subTileX = px / 8;
+        int subTileY = py / 8;
+        int tilePixelX = px % 8;
+        int tilePixelY = py % 8;
+
+        // Tile number: 8-bit wrap within name table
+        uint8_t actualTile = (uint8_t)(tileN + subTileX + subTileY * 16);
+
+        // Select name table based on OAM attr bit 0
+        uint32_t nameBase = nameTableBit ? nameBase1 : nameBase0;
+
+        // Byte address of this 8×8 tile in VRAM (4bpp = 32 bytes/tile)
+        uint32_t tileByteAddr = (nameBase + (uint32_t)actualTile * 32) & 0xFFFF; // wrap at 64KB
+        if (tileByteAddr + 32 > m_vram.size()) continue;
+
+        // Decode pixel from 4bpp tile
+        TileCache* tc = getTileCacheEntry((uint16_t)(tileByteAddr & 0xFFFF), 4);
+        if (!tc) continue;
+
+        uint8_t pixelIndex = tc->pixels[tilePixelY][tilePixelX];
+        if (pixelIndex == 0) continue;  // transparent
+
+        // Palette: bits[1:3] of attr select sprite sub-palette (0-7)
+        // Sprite palettes occupy CGRAM entries 128..255 (palette indices 8..15 in 4bpp terms)
+        uint8_t palette = 8 + ((attr >> 1) & 0x07);
+        uint32_t color = getColor(palette, pixelIndex, 4);
+
+        // Priority: bits[5:4] of attr
+        uint8_t priority = (attr >> 4) & 0x03;
+
+        return {color, priority};
     }
-    
-    return {0, 0}; // No sprite
+
+    return {0, 0};  // no sprite pixel
 }
 
 // Check if window masking applies to this pixel
@@ -2632,67 +3600,211 @@ bool PPU::checkWindowMask(int x, uint8_t windowSettings) {
     return result;
 }
 
-// Render Sub Screen
+// Render Sub Screen — used as source for color math
+// Sub screen renders the same BG layers as main screen, but using m_subScreenDesignation
+// and without window masking (windows on sub screen use TSW register).
 uint32_t PPU::renderSubScreen(int x) {
     int y = m_scanline;
-    
-    // Sub Screen uses same background layers but different designation
-    // For now, render same as main screen
-    // TODO: Implement proper sub screen rendering with different settings
-    
-    if (m_bgMode == 0) {
-        return renderBackgroundMode0(x);
-    } else if (m_bgMode == 1) {
-        return renderBackgroundMode1(x);
+
+    auto signScroll = [](uint16_t v) -> int {
+        int s = v & 0x03FF;
+        if (s >= 512) s -= 1024;
+        return s;
+    };
+
+    PixelInfo bgLayerPixels[4] = {{0,0},{0,0},{0,0},{0,0}};
+
+    switch (m_bgMode) {
+        case 0:
+            bgLayerPixels[0] = sampleBGLayer(0, x, y, signScroll(m_bg1ScrollX), signScroll(m_bg1ScrollY), 2, m_bgTileSize[0]);
+            bgLayerPixels[1] = sampleBGLayer(1, x, y, signScroll(m_bg2ScrollX), signScroll(m_bg2ScrollY), 2, m_bgTileSize[1]);
+            bgLayerPixels[2] = sampleBGLayer(2, x, y, signScroll(m_bg3ScrollX), signScroll(m_bg3ScrollY), 2, m_bgTileSize[2]);
+            bgLayerPixels[3] = sampleBGLayer(3, x, y, signScroll(m_bg4ScrollX), signScroll(m_bg4ScrollY), 2, m_bgTileSize[3]);
+            break;
+        case 1:
+            bgLayerPixels[0] = sampleBGLayer(0, x, y, signScroll(m_bg1ScrollX), signScroll(m_bg1ScrollY), 4, m_bgTileSize[0]);
+            bgLayerPixels[1] = sampleBGLayer(1, x, y, signScroll(m_bg2ScrollX), signScroll(m_bg2ScrollY), 4, m_bgTileSize[1]);
+            bgLayerPixels[2] = sampleBGLayer(2, x, y, signScroll(m_bg3ScrollX), signScroll(m_bg3ScrollY), 2, m_bgTileSize[2]);
+            break;
+        case 2: {
+            int optX=0, optY=0;
+            getOPTOffsets(m_vram, m_bgMapAddr[2], m_bgMapSize[2], x, y, m_bgTileSize[0]?16:8, optX, optY);
+            bgLayerPixels[0] = sampleBGLayer(0, x, y, signScroll(m_bg1ScrollX)+optX, signScroll(m_bg1ScrollY)+optY, 4, m_bgTileSize[0]);
+            bgLayerPixels[1] = sampleBGLayer(1, x, y, signScroll(m_bg2ScrollX)+optX, signScroll(m_bg2ScrollY)+optY, 4, m_bgTileSize[1]);
+            break;
+        }
+        case 3:
+            bgLayerPixels[0] = sampleBGLayer(0, x, y, signScroll(m_bg1ScrollX), signScroll(m_bg1ScrollY), 8, m_bgTileSize[0]);
+            bgLayerPixels[1] = sampleBGLayer(1, x, y, signScroll(m_bg2ScrollX), signScroll(m_bg2ScrollY), 4, m_bgTileSize[1]);
+            break;
+        case 4: {
+            int optX=0, optY=0;
+            getOPTOffsets(m_vram, m_bgMapAddr[2], m_bgMapSize[2], x, y, m_bgTileSize[0]?16:8, optX, optY);
+            bgLayerPixels[0] = sampleBGLayer(0, x, y, signScroll(m_bg1ScrollX)+optX, signScroll(m_bg1ScrollY)+optY, 8, m_bgTileSize[0]);
+            bgLayerPixels[1] = sampleBGLayer(1, x, y, signScroll(m_bg2ScrollX)+optX, signScroll(m_bg2ScrollY)+optY, 2, m_bgTileSize[1]);
+            break;
+        }
+        case 5: {
+            int hiresX = x * 2;
+            bgLayerPixels[0] = sampleBGLayer(0, hiresX, y, signScroll(m_bg1ScrollX), signScroll(m_bg1ScrollY), 4, m_bgTileSize[0]);
+            bgLayerPixels[1] = sampleBGLayer(1, hiresX, y, signScroll(m_bg2ScrollX), signScroll(m_bg2ScrollY), 2, m_bgTileSize[1]);
+            break;
+        }
+        case 6: {
+            int optX=0, optY=0;
+            getOPTOffsets(m_vram, m_bgMapAddr[2], m_bgMapSize[2], x, y, 8, optX, optY);
+            int hiresX = x * 2;
+            bgLayerPixels[0] = sampleBGLayer(0, hiresX, y, signScroll(m_bg1ScrollX)+optX, signScroll(m_bg1ScrollY)+optY, 4, m_bgTileSize[0]);
+            break;
+        }
+        case 7: {
+            uint32_t c7 = renderBackgroundMode7(x);
+            uint32_t backdropSub = getBGColorFromCGRAM(m_cgram);
+            bgLayerPixels[0] = {c7, (c7 == backdropSub) ? (uint8_t)0 : (uint8_t)1};
+            break;
+        }
+        default:
+            break;
     }
-    
-    return 0x000000FF; // Black (0xRRGGBBAA format)
+
+    // Apply sub-screen window masking (TSW register, $212F)
+    // Sub-screen window logic mirrors main screen but uses m_tsw for enable bits.
+    // We reuse the same windowMaskLayer logic inline here.
+    bool inWin1sub = (x >= (int)m_wh0 && x <= (int)m_wh1);
+    bool inWin2sub = (x >= (int)m_wh2 && x <= (int)m_wh3);
+    auto subWindowMask = [&](int layerBit) -> bool {
+        uint8_t wsel;
+        uint8_t wlogic;
+        int wselShift, wlogicShift;
+        switch (layerBit) {
+            case 0: wsel=m_w12sel; wselShift=0; wlogic=m_wbglog;  wlogicShift=0; break;
+            case 1: wsel=m_w12sel; wselShift=4; wlogic=m_wbglog;  wlogicShift=2; break;
+            case 2: wsel=m_w34sel; wselShift=0; wlogic=m_wbglog;  wlogicShift=4; break;
+            case 3: wsel=m_w34sel; wselShift=4; wlogic=m_wbglog;  wlogicShift=6; break;
+            case 4: wsel=m_wobjsel;wselShift=0; wlogic=m_wobjlog; wlogicShift=0; break;
+            default: return false;
+        }
+        bool w1en  = (wsel >> (wselShift + 1)) & 1;
+        bool w1inv = (wsel >> (wselShift + 0)) & 1;
+        bool w2en  = (wsel >> (wselShift + 3)) & 1;
+        bool w2inv = (wsel >> (wselShift + 2)) & 1;
+        bool w1inside = w1en && (inWin1sub ^ w1inv);
+        bool w2inside = w2en && (inWin2sub ^ w2inv);
+        uint8_t logic = (wlogic >> wlogicShift) & 0x03;
+        bool masked;
+        if (!w1en && !w2en) masked = false;
+        else if (w1en && !w2en) masked = w1inside;
+        else if (!w1en && w2en) masked = w2inside;
+        else {
+            switch (logic) {
+                case 0: masked = w1inside || w2inside;   break;
+                case 1: masked = w1inside && w2inside;   break;
+                case 2: masked = w1inside ^  w2inside;   break;
+                case 3: masked = !(w1inside ^ w2inside); break;
+                default: masked = false; break;
+            }
+        }
+        return masked;
+    };
+
+    for (int i = 0; i < 4; i++) {
+        if (bgLayerPixels[i].color != 0 && (m_tsw & (1 << i))) {
+            if (subWindowMask(i)) bgLayerPixels[i] = {0, 0};
+        }
+    }
+
+    // Composite sub screen using sub-screen designation (TS register)
+    uint32_t subPixel = getBGColorFromCGRAM(m_cgram);
+    uint8_t maxPri = 0;
+    bool found = false;
+    for (int i = 0; i < 4; i++) {
+        if (!(m_subScreenDesignation & (1 << i))) continue;
+        if (bgLayerPixels[i].color == 0) continue;
+        if (!found || bgLayerPixels[i].priority >= maxPri) {
+            maxPri = bgLayerPixels[i].priority;
+            subPixel = bgLayerPixels[i].color;
+            found = true;
+        }
+    }
+    return subPixel;
 }
 
 // Apply Color Math (Add/Sub mode)
+// CGADSUB ($2131):
+//   bit 7 = subtract mode (0=add, 1=subtract)
+//   bit 6 = half mode (divide result by 2)
+//   bits 5-0 = layer enable (bit5=backdrop, bit4=OBJ, bit3=BG4, bit2=BG3, bit1=BG2, bit0=BG1)
+// CGWSEL ($2130): MMCC DD.S
+//   bits 7-6 (MM) = Prevent Color Math area (0=never, 1=outside win, 2=inside win, 3=always)
+//   bits 5-4 (CC) = Clip main screen to black (0=never, 1=outside win, 2=inside win, 3=always)
+//   bits 3-2 (DD) = Color Math Enable area (0=always, 1=inside win only, 2=outside win only, 3=never)
+//   bit 1 = subscreen source (0=fixed color, 1=subscreen)
+//   bit 0 = direct color mode for 256-color BGs (not implemented here)
 uint32_t PPU::applyColorMath(uint32_t mainColor, uint32_t subColor) {
-    // Color Math modes:
-    // CGWS bit 0-1: Math mode
-    // CGADSUB: Controls which layers participate and add/subtract mode
-    
-    if ((m_cgws & 0x03) == 0) {
-        // Math disabled
-        return mainColor;
-    }
-    
-    // Extract RGB components
-    uint8_t mainR = (mainColor & 0xFF);
-    uint8_t mainG = ((mainColor >> 8) & 0xFF);
-    uint8_t mainB = ((mainColor >> 16) & 0xFF);
-    
-    uint8_t subR = (subColor & 0xFF);
-    uint8_t subG = ((subColor >> 8) & 0xFF);
-    uint8_t subB = ((subColor >> 16) & 0xFF);
-    
-    uint8_t finalR, finalG, finalB;
-    
+    // Extract 5-bit SNES color channels from 8-bit RGBA
+    // Our framebuffer is R|G<<8|B<<16|A<<24 (little-endian RGBA8888)
+    // Convert back to 5-bit for SNES arithmetic, then back to 8-bit
+    uint8_t mainR5 = (mainColor & 0xFF) >> 3;
+    uint8_t mainG5 = ((mainColor >> 8) & 0xFF) >> 3;
+    uint8_t mainB5 = ((mainColor >> 16) & 0xFF) >> 3;
+
+    uint8_t subR5  = (subColor & 0xFF) >> 3;
+    uint8_t subG5  = ((subColor >> 8) & 0xFF) >> 3;
+    uint8_t subB5  = ((subColor >> 16) & 0xFF) >> 3;
+
     bool subtractMode = (m_cgadsub & 0x80) != 0;
-    
+    bool halfMode     = (m_cgadsub & 0x40) != 0;
+
+    int finalR5, finalG5, finalB5;
+
     if (subtractMode) {
-        // Subtract: Main - Sub
-        finalR = (mainR > subR) ? (mainR - subR) : 0;
-        finalG = (mainG > subG) ? (mainG - subG) : 0;
-        finalB = (mainB > subB) ? (mainB - subB) : 0;
+        // Subtract: clamp to 0
+        finalR5 = (int)mainR5 - (int)subR5;
+        finalG5 = (int)mainG5 - (int)subG5;
+        finalB5 = (int)mainB5 - (int)subB5;
+        if (finalR5 < 0) finalR5 = 0;
+        if (finalG5 < 0) finalG5 = 0;
+        if (finalB5 < 0) finalB5 = 0;
     } else {
-        // Add: Main + Sub (clamped to 255)
-        finalR = (mainR + subR > 255) ? 255 : (mainR + subR);
-        finalG = (mainG + subG > 255) ? 255 : (mainG + subG);
-        finalB = (mainB + subB > 255) ? 255 : (mainB + subB);
+        // Add: clamp to 31
+        finalR5 = (int)mainR5 + (int)subR5;
+        finalG5 = (int)mainG5 + (int)subG5;
+        finalB5 = (int)mainB5 + (int)subB5;
+        if (finalR5 > 31) finalR5 = 31;
+        if (finalG5 > 31) finalG5 = 31;
+        if (finalB5 > 31) finalB5 = 31;
     }
-    
-    // Half brightness mode (bit 0 of CGWS)
-    if ((m_cgws & 0x01) != 0) {
-        finalR = (finalR * mainR) / 256;
-        finalG = (finalG * mainG) / 256;
-        finalB = (finalB * mainB) / 256;
+
+    if (halfMode) {
+        // Divide by 2 (arithmetic right shift)
+        finalR5 >>= 1;
+        finalG5 >>= 1;
+        finalB5 >>= 1;
     }
-    
-    return (0xFF << 24) | (finalB << 16) | (finalG << 8) | finalR;
+
+    // Convert 5-bit back to 8-bit
+    uint8_t r = (uint8_t)(finalR5 << 3) | (finalR5 >> 2);
+    uint8_t g = (uint8_t)(finalG5 << 3) | (finalG5 >> 2);
+    uint8_t b = (uint8_t)(finalB5 << 3) | (finalB5 >> 2);
+
+    return (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16) | (0xFF << 24);
+}
+
+// Apply VRAM address translation (VMAIN bits 3-2) to a WORD address.
+// Translation modes interleave tile plane bits for certain DMA patterns.
+// Source: snes9x PPUADDR_Translation
+uint16_t PPU::applyVRAMMapping(uint16_t addr) const {
+    // SNES VRAM has 32768 word addresses (15-bit: 0x0000-0x7FFF).
+    // Mask to 15 bits first to prevent out-of-bounds access when address
+    // wraps beyond 0x7FFF (e.g., after a 65536-byte clear DMA).
+    addr &= 0x7FFF;
+    switch (m_vramMapping) {
+        case 0: return addr;
+        case 1: return (addr & 0xFF00) | ((addr & 0x001F) << 3) | ((addr >> 5) & 0x0007);
+        case 2: return (addr & 0xFE00) | ((addr & 0x003F) << 3) | ((addr >> 6) & 0x0007);
+        case 3: return (addr & 0xFC00) | ((addr & 0x007F) << 3) | ((addr >> 7) & 0x0007);
+    }
+    return addr;
 }
 
 void PPU::incrementVRAMAddress() {
@@ -2753,38 +3865,12 @@ void PPU::loadROMData(const std::vector<uint8_t>& romData) {
     oss << std::dec << std::endl;
     Logger::getInstance().logPPU(oss.str());
     
-    // Initialize CGRAM with some test colors
-    for (int i = 0; i < 256; i++) {
-        // Create a simple color palette
-        uint16_t color = 0;
-        if (i < 16) {
-            // First palette: grayscale
-            uint8_t intensity = (i * 255) / 15;
-            color = (intensity >> 3) | ((intensity >> 3) << 5) | ((intensity >> 3) << 10);
-        } else if (i < 32) {
-            // Second palette: red tones
-            uint8_t red = ((i - 16) * 255) / 15;
-            color = (red >> 3) | (0 << 5) | (0 << 10);
-        } else if (i < 48) {
-            // Third palette: green tones
-            uint8_t green = ((i - 32) * 255) / 15;
-            color = (0) | ((green >> 3) << 5) | (0 << 10);
-        } else if (i < 64) {
-            // Fourth palette: blue tones
-            uint8_t blue = ((i - 48) * 255) / 15;
-            color = (0) | (0 << 5) | ((blue >> 3) << 10);
-        } else {
-            // Other palettes: mixed colors
-            color = (i % 32) | ((i % 32) << 5) | ((i % 32) << 10);
-        }
-        
-        m_cgram[i * 2] = color & 0xFF;
-        m_cgram[i * 2 + 1] = (color >> 8) & 0xFF;
-    }
-    
+    // Do NOT pre-fill CGRAM with test colors — the game will initialize CGRAM via DMA/CPU writes.
+    // Pre-filling would override the game's palette and cause wrong colors.
+    // CGRAM is already zero-initialized from the constructor (black = transparent backdrop).
     oss.str("");
     oss.clear();
-    oss << "Initialized CGRAM with test colors" << std::endl;
+    oss << "CGRAM left at zero — game will write palette via $2121/$2122" << std::endl;
     Logger::getInstance().logPPU(oss.str());
     Logger::getInstance().flush();
 }

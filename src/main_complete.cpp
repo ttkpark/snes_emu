@@ -4,6 +4,8 @@
 #include <string>
 #include <stdlib.h>
 #include <windows.h>
+#include <io.h>
+#include <fcntl.h>
 #include <iomanip>
 #include <chrono>
 #include <csignal>
@@ -64,26 +66,55 @@ void compareVectors(const std::vector<uint16_t>& original, const std::vector<uin
 int main(int argc, char* argv[]) {
     signal(SIGSEGV, crashHandler);
     signal(SIGABRT, crashHandler);
+
+    // Headless mode: --headless → no SDL window, binary frames to stdout, input from stdin
+    bool headlessMode = false;
+    uint64_t maxFrames = 0; // 0 = unlimited
+    for (int i = 1; i < argc; i++) {
+        if (std::string(argv[i]) == "--headless") {
+            headlessMode = true;
+        } else if (std::string(argv[i]).rfind("--max-frames=", 0) == 0) {
+            maxFrames = (uint64_t)std::atoi(argv[i] + 13);
+        }
+    }
+    if (headlessMode) {
+        // Redirect std::cout to stderr so binary stdout stays clean
+        std::cout.rdbuf(std::cerr.rdbuf());
+        // Binary mode stdout/stdin for frame pipe
+        _setmode(_fileno(stdout), _O_BINARY);
+        _setmode(_fileno(stdin),  _O_BINARY);
+        // Dummy SDL drivers (no window/audio device)
+        _putenv("SDL_VIDEODRIVER=dummy");
+        _putenv("SDL_AUDIODRIVER=dummy");
+    }
+
     std::cout << "SNES Emulator - Complete SDL2 Version" << std::endl;
-    
+
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
         std::cerr << "Failed to initialize SDL: " << SDL_GetError() << std::endl;
         return 1;
     }
-    
-    // Check for cycle limit argument
+
+    // Check for cycle limit argument (argv[2] if it looks like a number)
     int cycleLimit = -1; // -1 means no limit
     if (argc > 2) {
-        cycleLimit = std::atoi(argv[2]);
-        std::cout << "Cycle limit set to: " << cycleLimit << std::endl;
+        const char* a = argv[2];
+        if (a[0] != '-' || (a[1] >= '0' && a[1] <= '9')) {
+            cycleLimit = std::atoi(a);
+            if (cycleLimit > 0)
+                std::cout << "Cycle limit set to: " << cycleLimit << std::endl;
+        }
     }
     
-    // Load ROM
+    // Load ROM (skip --headless and other flag arguments)
     std::string romPath = "spctest.sfc";
-    if (argc > 1) {
-        romPath = argv[1];
-        std::cout << "Loading ROM from command line: " << romPath << std::endl;
+    for (int i = 1; i < argc; i++) {
+        if (std::string(argv[i]).rfind("--", 0) != 0) {
+            romPath = argv[i];
+            std::cout << "Loading ROM from command line: " << romPath << std::endl;
+            break;
+        }
     }
     std::ifstream romFile(romPath, std::ios::binary);
     if (!romFile) {
@@ -522,15 +553,15 @@ int main(int argc, char* argv[]) {
     ppu.loadROMData(romData);
     std::cout << "ppu.loadROMData() completed." << std::endl;
     
-    // Initialize PPU video
-    if (!ppu.initVideo()) {
+    // Initialize PPU video (skip in headless mode)
+    if (!headlessMode && !ppu.initVideo()) {
         std::cerr << "Failed to initialize PPU video." << std::endl;
         SDL_Quit();
         return 1;
     }
-    
-    // Initialize APU audio
-    if (!apu.initAudio()) {
+
+    // Initialize APU audio (skip in headless mode)
+    if (!headlessMode && !apu.initAudio()) {
         std::cerr << "Failed to initialize APU audio." << std::endl;
         ppu.cleanup();
         SDL_Quit();
@@ -634,11 +665,61 @@ int main(int argc, char* argv[]) {
     std::cout << "Starting emulation loop..." << std::endl;
     std::cout << "Controls: Arrow keys, Z/X/A/S for buttons" << std::endl;
     
+    // Headless stdin: accumulated line buffer for button commands
+    static char s_stdinBuf[4096];
+    static int  s_stdinBufLen = 0;
+
     while (running) {
         // No timeout for interactive use - user closes window to exit
-        
-        // Process SDL events once per frame
-        {
+
+        if (headlessMode) {
+            // Non-blocking stdin read for button commands: "BTN <NAME> <0|1>\n"
+            HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
+            DWORD bytesAvail = 0;
+            if (PeekNamedPipe(hStdin, nullptr, 0, nullptr, &bytesAvail, nullptr) && bytesAvail > 0) {
+                int _avail = (int)bytesAvail, _space = (int)(sizeof(s_stdinBuf) - s_stdinBufLen - 1);
+                DWORD toRead = (DWORD)(_avail < _space ? _avail : _space);
+                DWORD nRead = 0;
+                if (ReadFile(hStdin, s_stdinBuf + s_stdinBufLen, toRead, &nRead, nullptr)) {
+                    s_stdinBufLen += (int)nRead;
+                    s_stdinBuf[s_stdinBufLen] = '\0';
+                    char* lineStart = s_stdinBuf;
+                    char* nl;
+                    while ((nl = strchr(lineStart, '\n')) != nullptr) {
+                        *nl = '\0';
+                        char btnName[32] = {};
+                        int pressed = 0;
+                        if (sscanf(lineStart, "BTN %31s %d", btnName, &pressed) == 2) {
+                            std::string nm(btnName);
+                            SimpleInput::ButtonBit bit = SimpleInput::BIT_B;
+                            bool found = true;
+                            if      (nm == "UP")     bit = SimpleInput::BIT_UP;
+                            else if (nm == "DOWN")   bit = SimpleInput::BIT_DOWN;
+                            else if (nm == "LEFT")   bit = SimpleInput::BIT_LEFT;
+                            else if (nm == "RIGHT")  bit = SimpleInput::BIT_RIGHT;
+                            else if (nm == "A")      bit = SimpleInput::BIT_A;
+                            else if (nm == "B")      bit = SimpleInput::BIT_B;
+                            else if (nm == "X")      bit = SimpleInput::BIT_X;
+                            else if (nm == "Y")      bit = SimpleInput::BIT_Y;
+                            else if (nm == "L")      bit = SimpleInput::BIT_L;
+                            else if (nm == "R")      bit = SimpleInput::BIT_R;
+                            else if (nm == "START")  bit = SimpleInput::BIT_START;
+                            else if (nm == "SELECT") bit = SimpleInput::BIT_SELECT;
+                            else found = false;
+                            if (found) {
+                                input.setButton(bit, pressed != 0);
+                                fprintf(stderr, "[BTN_RECV] Frame=%llu %s %d\n",
+                                    (unsigned long long)frameCount, btnName, pressed);
+                            }
+                        }
+                        lineStart = nl + 1;
+                    }
+                    s_stdinBufLen = (int)(s_stdinBuf + s_stdinBufLen - lineStart);
+                    memmove(s_stdinBuf, lineStart, s_stdinBufLen);
+                }
+            }
+        } else {
+            // Process SDL events once per frame
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
                 if (event.type == SDL_QUIT) {
@@ -648,44 +729,66 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Run one full frame: 262 scanlines × 341 dots = 89342 master cycles
-        static int ppuCounter = 0;
-        static int cpuCounter = 0;
-        static int apuCounter = 0;
+        // Run one full frame: 262 scanlines × 341 dots
+        // PPU runs every 4 master cycles, CPU every 6, APU every 2
+        // LCM(4,6,2) = 12 master cycles per batch = 3 PPU, 2 CPU, 6 APU steps
+        // 89342 / 12 = 7445 batches (with 2 master cycles remainder)
         static int lastScanline = -1;
+        static int cpuCyclePending = 0;  // extra ticks to stall CPU (slow-ROM timing)
 
-        for (int mc = 0; mc < 89342 && running; mc++) {
-            ppuCounter++;
-            cpuCounter++;
-            apuCounter++;
-
-            if (ppuCounter >= 4) {
-                ppuCounter = 0;
+        // 6 master cycles per tick: 1.5 PPU, 1 CPU, 3 APU
+        // Use 14890 ticks (= 89340 master cycles, close to 89342)
+        for (int tick = 0; tick < 14890 && running; tick++) {
+            // PPU: 1 step every 4 master cycles → 1.5 per 6mc tick
+            // Alternate: 1 PPU on even ticks, 2 PPU on odd ticks (avg 1.5)
+            if (tick & 1) {
                 ppu.step();
+                ppu.step();
+            } else {
+                ppu.step();
+            }
 
-                // Auto-Joypad at VBlank
-                if (lastScanline != 225 && ppu.getScanline() == 225) {
+            // Auto-Joypad at VBlank; HDMA at each H-blank (scanlines 0-223)
+            int curScanline = ppu.getScanline();
+            if (curScanline != lastScanline) {
+                // H-blank DMA: fires once per scanline during active display
+                if (lastScanline >= 0 && lastScanline < 224) {
+                    memory.performHDMA(lastScanline);
+                }
+                // Auto-Joypad read at VBlank start
+                if (lastScanline != 225 && curScanline == 225) {
                     memory.performAutoJoypadRead();
+                    // HDMA re-initialised every VBlank (hardware re-loads table pointers)
+                    memory.initHDMA();
                 }
-                lastScanline = ppu.getScanline();
+                // Tick auto-joypad busy countdown once per scanline
+                memory.tickAutoJoypadBusy();
             }
+            lastScanline = curScanline;
 
-            if (cpuCounter >= 6) {
-                cpuCounter = 0;
-                // Skip CPU during DMA (CPU is halted while DMA runs)
-                if (memory.m_dmaCyclesPending > 0) {
-                    memory.m_dmaCyclesPending -= 6;
-                } else {
-                    cpu.step();
-                    if (cpu.m_quitEmulation) { running = false; break; }
+            // CPU: slow-ROM = 4 cycles/instr × 8MC/cycle = 32MC = ~5.3 ticks/instr
+            // Add 4 extra stall ticks after each instruction (net ~5 ticks/instr)
+            if (memory.m_dmaCyclesPending > 0) {
+                memory.m_dmaCyclesPending -= 6;
+            } else if (cpuCyclePending > 0) {
+                cpuCyclePending--;
+            } else {
+                cpu.step();
+                // Per-instruction cycle timing (slow-ROM: 1 CPU cycle = 8 MC = ~1.33 ticks of 6 MC)
+                // cpuCyclePending = round(lastCycles * 8/6) - 1 = round(lastCycles * 4/3) - 1
+                {
+                    int lc = cpu.getLastCycles();
+                    cpuCyclePending = (lc * 4 + 1) / 3 - 1;
+                    if (cpuCyclePending < 0) cpuCyclePending = 0;
                 }
-                cycleCount++;
+                if (cpu.m_quitEmulation) { running = false; break; }
             }
+            cycleCount++;
 
-            if (apuCounter >= 2) {
-                apuCounter = 0;
-                apu.step();
-            }
+            // APU: 3 steps per 6 master cycles (every 2mc)
+            apu.step();
+            apu.step();
+            apu.step();
         } // end frame loop
 
         // Render frame if ready
@@ -694,17 +797,91 @@ int main(int argc, char* argv[]) {
             ppu.clearFrameReady();
             frameCount++;
 
-            // Auto-test: simulate input after initialization
-            if (frameCount == 15) {
-                std::cout << "[AUTO] Frame " << frameCount << ": pressing DOWN" << std::endl;
-                input.setButton(SimpleInput::BIT_DOWN, true);
-            } else if (frameCount == 16) {
-                input.setButton(SimpleInput::BIT_DOWN, false);
-            } else if (frameCount == 18) {
-                std::cout << "[AUTO] Frame " << frameCount << ": pressing START" << std::endl;
-                input.setButton(SimpleInput::BIT_START, true);
-            } else if (frameCount == 19) {
-                input.setButton(SimpleInput::BIT_START, false);
+            if (headlessMode) {
+                // Binary frame to stdout: 'FRME' + frame_num(4) + apu_ports(4) + RGBA(229376)
+                static const uint8_t kMagic[4] = {'F','R','M','E'};
+                uint32_t fn = (uint32_t)frameCount;
+                uint8_t apu_ports[4] = {
+                    apu.readPort(0), apu.readPort(1),
+                    apu.readPort(2), apu.readPort(3)
+                };
+                fwrite(kMagic,     1, 4, stdout);
+                fwrite(&fn,        4, 1, stdout);
+                fwrite(apu_ports,  1, 4, stdout);
+                fwrite(ppu.getFramebuffer(), 4,
+                       PPU::SCREEN_WIDTH * PPU::SCREEN_HEIGHT, stdout);
+                fflush(stdout);
+            }
+
+            // Max-frames limit (headless testing)
+            if (maxFrames > 0 && frameCount >= maxFrames) {
+                running = false;
+            }
+
+            // FPS counter every 60 frames
+            if (frameCount % 60 == 0) {
+                auto now = std::chrono::high_resolution_clock::now();
+                double elapsed = std::chrono::duration<double>(now - startTime).count();
+                double fps = frameCount / elapsed;
+                fprintf(stderr, "[PERF] Frame %llu, %.1f FPS (%.1fx speed)\n",
+                    (unsigned long long)frameCount, fps, fps / 60.09);
+            }
+
+            // Snapshot WRAM[$0000-$00FF] at each frame during test window to find fail flag
+            bool isFinalFrame = (maxFrames > 0 && frameCount == maxFrames);
+            if ((frameCount >= 168 && frameCount <= 178) || frameCount == 200 || frameCount == 220 || frameCount == 240 || frameCount == 280 || frameCount == 340 || frameCount == 400 || frameCount == 450 || frameCount == 500 || frameCount == 600 || frameCount == 700 || frameCount == 800 || frameCount == 900 || frameCount == 1000 || frameCount == 1100 || frameCount == 1200 || isFinalFrame) {
+                const auto& wram = memory.getWRAM();
+                fprintf(stderr, "[SNAP] F:%llu WRAM[00..7F]:", (unsigned long long)frameCount);
+                for (int i = 0; i < 0x80; i++) {
+                    if (i % 16 == 0) fprintf(stderr, "\n  %02X: ", i);
+                    fprintf(stderr, "%02X ", wram[i]);
+                }
+                fprintf(stderr, "\n[SNAP] F:%llu WRAM[80..FF]:", (unsigned long long)frameCount);
+                for (int i = 0x80; i < 0x100; i++) {
+                    if (i % 16 == 0) fprintf(stderr, "\n  %02X: ", i);
+                    fprintf(stderr, "%02X ", wram[i]);
+                }
+                fprintf(stderr, "\n");
+            }
+
+            // Auto-test: press buttons to advance through test screens
+            {
+            struct AutoInput { uint64_t frame; SimpleInput::ButtonBit btn; bool press; const char* name; };
+            static const AutoInput autoInputs[] = {
+                // === Electronics Test (item 1, default) ===
+                {90,  SimpleInput::BIT_START,  true,  "START"},   // Enter Electronics Test
+                {92,  SimpleInput::BIT_START,  false, nullptr},
+                // "PASSED ELECTRONICS TEST" visible at ~F:558; press SELECT to return to menu
+                {590, SimpleInput::BIT_SELECT, true,  "SELECT"},  // Exit PASSED screen
+                {592, SimpleInput::BIT_SELECT, false, nullptr},
+                // === Character Test (item 2) ===
+                // Back at main menu ~F:595; SELECT moves cursor from item1 to item2
+                {630, SimpleInput::BIT_SELECT, true,  "SELECT"},  // Navigate to item 2
+                {632, SimpleInput::BIT_SELECT, false, nullptr},
+                {670, SimpleInput::BIT_START,  true,  "START"},   // Enter Character Test
+                {672, SimpleInput::BIT_START,  false, nullptr},
+                // Character Test runs ~880 frames (F:670-F:1550), auto-exits to menu
+                // After Character Test finishes (~F:1560), navigate to Color Test
+                // SELECT at F:1600 to exit if needed, then navigate to item 5
+                {1600, SimpleInput::BIT_SELECT, true,  "SELECT"},
+                {1602, SimpleInput::BIT_SELECT, false, nullptr},
+                // Navigate: SELECT cycles menu items: item2→item3→item4→item5
+                {1640, SimpleInput::BIT_SELECT, true,  "SELECT"}, // item 3
+                {1642, SimpleInput::BIT_SELECT, false, nullptr},
+                {1660, SimpleInput::BIT_SELECT, true,  "SELECT"}, // item 4
+                {1662, SimpleInput::BIT_SELECT, false, nullptr},
+                {1680, SimpleInput::BIT_SELECT, true,  "SELECT"}, // item 5 (Color Test)
+                {1682, SimpleInput::BIT_SELECT, false, nullptr},
+                {1720, SimpleInput::BIT_START,  true,  "START"},  // Enter Color Test
+                {1722, SimpleInput::BIT_START,  false, nullptr},
+            };
+            for (const auto& ai : autoInputs) {
+                if (frameCount == ai.frame) {
+                    input.setButton(ai.btn, ai.press);
+                    fprintf(stderr, "[AUTO] Frame %llu: %s %s\n", (unsigned long long)frameCount, ai.name ? ai.name : "REL", ai.press ? "PRESS" : "RELEASE");
+                }
+            }
+            // Non-headless: no extra navigation input needed (Electronics Test is default)
             }
         }
 

@@ -12,6 +12,8 @@ public:
     
     // NMI (Non-Maskable Interrupt) support
     void triggerNMI();
+    // IRQ (Maskable Interrupt) support
+    void triggerIRQ();
     void setPPU(PPU* ppu) { m_ppu = ppu; }
     
     uint16_t getPC() const { return m_pc; }
@@ -32,6 +34,7 @@ public:
     bool shouldSuppressLogging() const { return m_suppressLogging; }
     
     bool m_quitEmulation;
+    int getLastCycles() const { return m_lastCycles; }
 private:
     Memory* m_memory;
     PPU* m_ppu;
@@ -39,12 +42,13 @@ private:
     uint16_t m_a;       // Accumulator
     uint16_t m_x, m_y;  // Index registers
     uint16_t m_sp;      // Stack Pointer (16-bit for Native Mode, 8-bit for Emulation Mode)
-    volatile uint8_t m_p;        // Status flags
+    uint8_t m_p;        // Status flags
     uint64_t m_cycles;
     
     // Interrupt flags
     bool m_nmiPending;
     bool m_nmiEnabled;
+    bool m_irqPending;      // H/V timer IRQ pending
     
     // 65816 mode flags
     bool m_modeM;  // M flag: true = 8-bit A, false = 16-bit A
@@ -58,6 +62,9 @@ private:
     
     // Logging control
     bool m_suppressLogging;
+
+    // Per-instruction cycle count (slow-ROM: 1 cycle = 2 PPU dots)
+    int m_lastCycles;
     
     // Infinite loop detection
     uint32_t m_lastPC;        // Last PC address (full address: PBR + PC)
@@ -72,6 +79,7 @@ private:
     
     void executeInstruction(uint8_t opcode);
     void handleNMI();
+    void handleIRQ();
     void updateModeFlags();  // Update M, X flags from P register
     void dumpMemory();       // Dump memory for debugging infinite loops
     

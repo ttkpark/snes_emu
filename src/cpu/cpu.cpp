@@ -29,6 +29,7 @@ CPU::CPU(Memory* memory)
     , m_cycles(0)
     , m_nmiPending(false)
     , m_nmiEnabled(true)
+    , m_irqPending(false)
     , m_modeM(true)   // Start in 8-bit mode
     , m_modeX(true)   // Start in 8-bit mode
     , m_emulationMode(true)  // Start in emulation mode
@@ -36,6 +37,7 @@ CPU::CPU(Memory* memory)
     , m_dbr(0x00)     // Data Bank register
     , m_pbr(0x00)     // Program Bank register
     , m_suppressLogging(false)
+    , m_lastCycles(4)
     , m_lastPC(0)
     , m_loopCount(0)
     , m_historyIndex(0)
@@ -76,12 +78,6 @@ void CPU::reset() {
 }
 
 void CPU::step() {
-    static bool warnedTiming = false;
-    if (!warnedTiming) {
-        std::cout << "[WARN] CPU timing is simplified; cycle-accurate 65C816 timing (memory wait states, page boundary penalties, DMA stalls) is not fully emulated." << std::endl;
-        warnedTiming = true;
-    }
-
     // Infinite loop detection
     uint32_t currentPC = m_address;  // Full address: PBR + PC
     
@@ -202,21 +198,7 @@ void CPU::step() {
         }
     }
     
-    // Check for pending NMI (Non-Maskable Interrupt)
-    static int nmiLogCount = 0;
-    if (m_nmiPending && m_nmiEnabled) {
-        if (true) {
-            std::ostringstream oss;
-            oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') << m_cycles << "] "
-                << "*** NMI TRIGGERED *** PC:0x" << std::hex << std::setw(6) << std::setfill('0') << m_pc
-                << " -> Vector:0x" << (m_emulationMode ? 0xFFFA : 0xFFEA)
-                << "($" << m_memory->read16(m_emulationMode ? 0xFFFA : 0xFFEA) << ")";
-            Logger::getInstance().logCPU(oss.str());
-            nmiLogCount++;
-        }
-        handleNMI();
-        m_nmiPending = false;
-    }
+    // NMI/IRQ are processed AFTER instruction execution (see bottom of step())
     
     
     // Legacy check for fail condition (entering fail routine at 0x008242) - spctest only
@@ -339,7 +321,7 @@ void CPU::step() {
     
     // Always increment instruction count
     instructionCount++;
-    
+
     // Detailed logging for VBlank loop debugging
     bool atFailRoutine = (m_address >= 0x008240 && m_address <= 0x008270);
     bool atWaitVBlank = (m_address >= 0x00825b && m_address <= 0x008265);  // Expanded range to include both wait loops
@@ -357,11 +339,20 @@ void CPU::step() {
     
     // Skip detailed instruction logging for repetitive loops to reduce log size
     bool enableLogging = true;
-    
-    if (enableLogging) {
+
+    // Targeted crash trace: log CPU instructions near crash area in frame 184
+    int cpuFrameNum = m_ppu ? m_ppu->getFrameCount() : -1;
+    // Log when PC is in the suspected crash area ($F7C0-$F7F0) during frame 184
+    if (cpuFrameNum == 184 && m_pbr == 0x00 && m_pc >= 0xF780 && m_pc <= 0xF800) {
+        uint8_t peekOp = m_memory->read8(m_address);
+        fprintf(stderr, "[CRASH_TRACE] F:%d PC:%02X:%04X op=%02X A=%04X X=%04X Y=%04X SP=%04X P=%02X DBR=%02X\n",
+                cpuFrameNum, m_pbr, m_pc, peekOp, m_a, m_x, m_y, m_sp, m_p, m_dbr);
+    }
+
+    if (enableLogging && Logger::getInstance().isLoggingEnabled()) {
         // Enable detailed logging - filter repetitive loops
         bool shouldLog = !atWaitVBlank && !atWaitResult && !atUpdateTestNum && !atWriteHex && !atFailedLoop;
-        
+
         // Log every 1000th instruction in repetitive loops to track progress
         static int waitResultCount = 0;
         static int updateTestNumCount = 0;
@@ -381,35 +372,40 @@ void CPU::step() {
         } else {
             updateTestNumCount = 0;
         }
-        
+
         if (instructionCount % 10000 == 0) {
             shouldLog = true;
             stackTrace();
-            // Log RDNMI value every 10000 cycles to diagnose VBlank issue
-            uint8_t rdnmiValue = m_memory->read8(0x004210);
-            std::ostringstream rdnmiLog;
-            rdnmiLog << "[RDNMI-10K] Cycle=" << std::dec << m_cycles 
-                     << " Value=$" << std::hex << std::setw(2) << std::setfill('0') << (int)rdnmiValue
-                     << " N=" << ((rdnmiValue & 0x80) ? "1" : "0");
+            // Diagnostic: peek at VBlank flag WITHOUT side effects.
+            // IMPORTANT: Do NOT use m_memory->read8(0x004210) here -- that goes
+            // through the normal PPU register path and clears the NMI flag on
+            // read, stealing VBlank detection from the ROM's $4210 polling loop.
+            // Instead, query the PPU state directly.
             if (m_ppu) {
-                rdnmiLog << " Scanline=" << std::dec << m_ppu->getScanline();
+                int diagScanline = m_ppu->getScanline();
+                int diagVBS = m_ppu->getVBlankStart();
+                bool inVBlank = (diagScanline >= diagVBS);
+                std::ostringstream rdnmiLog;
+                rdnmiLog << "[RDNMI-10K] Cycle=" << std::dec << m_cycles
+                         << " InVBlank=" << (inVBlank ? "Y" : "N")
+                         << " Scanline=" << diagScanline;
+                Logger::getInstance().logCPU(rdnmiLog.str());
             }
-            Logger::getInstance().logCPU(rdnmiLog.str());
         }
-            
+
         uint8_t opcode = m_memory->read8(m_address);
 
         // Get opcode name and byte length
         const char* opcodeName = "???";
         int byteLength = 1; // Default: opcode only
-        
+
         // Complete 65816 instruction decode table
         switch (opcode) {
             // Interrupts and Exceptions
             case 0x00: opcodeName = "BRK"; byteLength = 2; break;
             case 0x02: opcodeName = "COP"; byteLength = 2; break;
             case 0x40: opcodeName = "RTI"; break;
-            
+
             // Stack Operations
             case 0x08: opcodeName = "PHP"; break;
             case 0x28: opcodeName = "PLP"; break;
@@ -424,7 +420,7 @@ void CPU::step() {
             case 0xF4: opcodeName = "PEA"; byteLength = 3; break;
             case 0x0B: opcodeName = "PHD"; break;
             case 0x2B: opcodeName = "PLD"; break;
-            
+
             // Jumps and Subroutines
             case 0x20: opcodeName = "JSR abs"; byteLength = 3; break;
             case 0xFC: opcodeName = "JSR ($abs,X)"; byteLength = 3; break;
@@ -437,7 +433,7 @@ void CPU::step() {
             case 0x60: opcodeName = "RTS"; break;
             case 0x6B: opcodeName = "RTL"; break;
             case 0x4B: opcodeName = "PHK"; break;
-            
+
             // Branches
             case 0x10: opcodeName = "BPL"; byteLength = 2; break;
             case 0x30: opcodeName = "BMI"; byteLength = 2; break;
@@ -449,7 +445,7 @@ void CPU::step() {
             case 0xB0: opcodeName = "BCS"; byteLength = 2; break;
             case 0xD0: opcodeName = "BNE"; byteLength = 2; break;
             case 0xF0: opcodeName = "BEQ"; byteLength = 2; break;
-            
+
             // Flag Operations
             case 0x18: opcodeName = "CLC"; break;
             case 0x38: opcodeName = "SEC"; break;
@@ -459,13 +455,13 @@ void CPU::step() {
             case 0xD8: opcodeName = "CLD"; break;
             case 0xF8: opcodeName = "SED"; break;
             case 0xFB: opcodeName = "XCE"; break;
-            
+
             // Processor Status
             case 0xC2: opcodeName = "REP"; byteLength = 2; break;
             case 0xE2: opcodeName = "SEP"; byteLength = 2; break;
             case 0xDB: opcodeName = "STP"; break;
             case 0xCB: opcodeName = "WAI"; break;
-            
+
             // Accumulator Operations
             case 0x0A: opcodeName = "ASL A"; break;
             case 0x2A: opcodeName = "ROL A"; break;
@@ -474,7 +470,7 @@ void CPU::step() {
             case 0x1A: opcodeName = "INC A"; break;
             case 0x3A: opcodeName = "DEC A"; break;
             case 0xEB: opcodeName = "XBA"; break;
-            
+
             // Register Transfers
             case 0x8A: opcodeName = "TXA"; break;
             case 0x9A: opcodeName = "TXS"; break;
@@ -482,11 +478,13 @@ void CPU::step() {
             case 0xA8: opcodeName = "TAY"; break;
             case 0xAA: opcodeName = "TAX"; break;
             case 0xBA: opcodeName = "TSX"; break;
-            case 0x1B: opcodeName = "TCS"; break; 
+            case 0x1B: opcodeName = "TCS"; break;
             case 0x3B: opcodeName = "TSC"; break;
             case 0x5B: opcodeName = "TCD"; break;
             case 0x7B: opcodeName = "TDC"; break;
-            
+            case 0x9B: opcodeName = "TXY"; break;
+            case 0xBB: opcodeName = "TYX"; break;
+
             // Load Operations
             case 0xA9: opcodeName = "LDA #"; byteLength = m_modeM ? 2 : 3; break;
             case 0xA5: opcodeName = "LDA dp"; byteLength = 2; break;
@@ -523,8 +521,11 @@ void CPU::step() {
             case 0x9D: opcodeName = "STA abs,X"; byteLength = 3; break;
             case 0x99: opcodeName = "STA abs,Y"; byteLength = 3; break;
             case 0x81: opcodeName = "STA (dp,X)"; byteLength = 2; break;
+            case 0x83: opcodeName = "STA sr,S"; byteLength = 2; break;
+            case 0x87: opcodeName = "STA [dp]"; byteLength = 2; break;
             case 0x91: opcodeName = "STA (dp),Y"; byteLength = 2; break;
             case 0x92: opcodeName = "STA (dp)"; byteLength = 2; break;
+            case 0x93: opcodeName = "STA (sr,S),Y"; byteLength = 2; break;
             case 0x97: opcodeName = "STA [dp],Y"; byteLength = 2; break;
             case 0x8F: opcodeName = "STA long"; byteLength = 4; break;
             case 0x9F: opcodeName = "STA long,X"; byteLength = 4; break;
@@ -666,7 +667,11 @@ void CPU::step() {
             case 0x34: opcodeName = "BIT dp,X"; byteLength = 2; break;
             case 0x3C: opcodeName = "BIT abs,X"; byteLength = 3; break;
             case 0x89: opcodeName = "BIT #"; byteLength = m_modeM ? 2 : 3; break;
-            
+            case 0x04: opcodeName = "TSB dp"; byteLength = 2; break;
+            case 0x0C: opcodeName = "TSB abs"; byteLength = 3; break;
+            case 0x14: opcodeName = "TRB dp"; byteLength = 2; break;
+            case 0x1C: opcodeName = "TRB abs"; byteLength = 3; break;
+
             // Shift Operations
             case 0x06: opcodeName = "ASL dp"; byteLength = 2; break;
             case 0x16: opcodeName = "ASL dp,X"; byteLength = 2; break;
@@ -730,13 +735,13 @@ void CPU::step() {
         if (shouldLog) {
             Logger::getInstance().logCPU(oss.str());
         }
-        
-        // Flush more frequently for debugging
-        if (instructionCount % 10 == 0) {
+
+        // Flush periodically for debugging (less frequently for performance)
+        if (instructionCount % 1000 == 0) {
             Logger::getInstance().flush();
         }
 
-        
+
     }
     
     // Restore PC and P before executing instruction (in case logging modified them)
@@ -746,15 +751,110 @@ void CPU::step() {
     uint8_t opcode = m_memory->read8(m_address_plus_1);
     uint16_t pcBeforeExec = m_pc - 1;  // PC was incremented by m_address_plus_1, so subtract 1
     bool wasInWaitLoop = (pcBeforeExec >= 0x008193 && pcBeforeExec <= 0x008196);
-    
+
+    // Trace: capture last 20 PCs before entry to F78D
+    {
+        static uint32_t recentPCs[20];
+        static uint8_t recentOps[20];
+        static uint8_t recentP[20];
+        static int recentIdx = 0;
+        recentPCs[recentIdx] = (m_pbr << 16) | pcBeforeExec;
+        recentOps[recentIdx] = opcode;
+        recentP[recentIdx] = m_p;
+        recentIdx = (recentIdx + 1) % 20;
+
+        int fc_trace = m_ppu ? m_ppu->getFrameCount() : -1;
+        if (m_pbr == 0x00 && pcBeforeExec == 0xF78D && fc_trace == 191) {
+            static bool dumped = false;
+            if (!dumped) {
+                dumped = true;
+                fprintf(stderr, "[ENTRY_F78D] Last 20 instructions before F78D:\n");
+                for (int i = 0; i < 20; i++) {
+                    int idx = (recentIdx + i) % 20;
+                    fprintf(stderr, "  %06X op=%02X P=%02X\n", recentPCs[idx], recentOps[idx], recentP[idx]);
+                }
+            }
+        }
+    }
+
     // Execute instruction
     executeInstruction(opcode);
-    
+
+    // Per-instruction cycle count table (65816 slow-ROM, native mode typical values)
+    // Format: base cycles. M=0 or X=0 adds +1 for memory-size-dependent ops.
+    static const uint8_t cycleTable[256] = {
+        7,6,7,4,5,3,5,6,3,2,2,2,6,4,6,5, // 00-0F  BRK,ORA(X,),COP,ORA,TSB,ORA,ASL,ORA,PHP,ORA#,ASL,PHD,TSB,ORA,ASL,OPL
+        2,5,5,7,5,4,6,6,2,4,2,2,6,4,7,5, // 10-1F  BPL,ORA(),ORA,ORA,TRB,ORA,ASL,ORA,CLC,ORA,INC,TCS,TRB,ORA,ASL,OPL
+        6,6,7,4,3,3,5,6,4,2,2,2,4,4,6,5, // 20-2F  JSR,AND(X,),JSL,AND,BIT,AND,ROL,AND,PLP,AND#,ROL,PLD,BIT,AND,ROL,OPL
+        2,5,5,7,4,4,6,6,2,4,2,2,4,4,7,5, // 30-3F  BMI,AND(),AND,AND,BIT,AND,ROL,AND,SEC,AND,DEC,TSC,BIT,AND,ROL,OPL
+        6,6,3,4,3,3,5,6,4,2,2,2,3,4,6,5, // 40-4F  RTI,EOR(X,),WDM,EOR,MVP,EOR,LSR,EOR,PHA,EOR#,LSR,PHK,JMP,EOR,LSR,OPL
+        2,5,5,7,4,4,6,6,2,4,3,2,4,4,7,5, // 50-5F  BVC,EOR(),EOR,EOR,MVN,EOR,LSR,EOR,CLI,EOR,PHY,TCD,JML,EOR,LSR,OPL
+        6,6,3,4,3,3,5,6,4,2,2,2,5,4,6,5, // 60-6F  RTS,ADC(X,),PER,ADC,STZ,ADC,ROR,ADC,PLA,ADC#,ROR,RTL,JMP,ADC,ROR,OPL
+        2,5,5,7,4,4,6,6,2,4,4,2,6,4,7,5, // 70-7F  BVS,ADC(),ADC,ADC,STZ,ADC,ROR,ADC,SEI,ADC,PLY,TDC,JMP,ADC,ROR,OPL
+        3,6,4,4,3,3,3,6,2,2,2,2,4,4,4,5, // 80-8F  BRA,STA(X,),BRL,STA,STY,STA,STX,STA,DEY,BIT#,TXA,PHB,STY,STA,STX,OPL
+        2,6,5,7,4,4,4,6,2,5,2,2,4,5,5,5, // 90-9F  BCC,STA(),STA,STA,STY,STA,STX,STA,TYA,STA,TXS,TXY,STZ,STA,STZ,OPL
+        2,6,2,4,3,3,3,6,2,2,2,2,4,4,4,5, // A0-AF  LDY#,LDA(X,),LDX#,LDA,LDY,LDA,LDX,LDA,TAY,LDA#,TAX,PLB,LDY,LDA,LDX,OPL
+        2,5,5,7,4,4,4,6,2,4,2,2,4,4,4,5, // B0-BF  BCS,LDA(),LDA,LDA,LDY,LDA,LDX,LDA,CLV,LDA,TSX,TYX,LDY,LDA,LDX,OPL
+        2,6,2,4,3,3,5,6,2,2,2,2,4,4,6,5, // C0-CF  CPY#,CMP(X,),REP,CMP,CPY,CMP,DEC,CMP,INY,CMP#,DEX,WAI,CPY,CMP,DEC,OPL
+        2,5,5,7,4,4,6,6,2,4,3,2,4,4,7,5, // D0-DF  BNE,CMP(),CMP,CMP,PEI,CMP,DEC,CMP,CLD,CMP,PHX,STP,JML,CMP,DEC,OPL
+        2,6,2,4,3,3,5,6,2,2,2,2,4,4,6,5, // E0-EF  CPX#,SBC(X,),SEP,SBC,CPX,SBC,INC,SBC,INX,SBC#,NOP,XBA,CPX,SBC,INC,OPL
+        2,5,5,7,5,4,6,6,2,4,4,2,6,4,7,5  // F0-FF  BEQ,SBC(),SBC,SBC,PEA,SBC,INC,SBC,SED,SBC,PLX,XCE,JSR,SBC,INC,OPL
+    };
+    m_lastCycles = cycleTable[opcode];
+    // Add 1 extra cycle for 16-bit accumulator memory ops (M=0)
+    if (!m_modeM) {
+        switch (opcode) {
+            case 0x09: case 0x0D: case 0x0F: case 0x19: case 0x1D: case 0x1F:
+            case 0x29: case 0x2D: case 0x2F: case 0x39: case 0x3D: case 0x3F:
+            case 0x49: case 0x4D: case 0x4F: case 0x59: case 0x5D: case 0x5F:
+            case 0x69: case 0x6D: case 0x6F: case 0x79: case 0x7D: case 0x7F:
+            case 0x89: case 0x8D: case 0x8F: case 0x99: case 0x9D:
+            case 0xA9: case 0xAD: case 0xAF: case 0xB9: case 0xBD: case 0xBF:
+            case 0xC9: case 0xCD: case 0xCF: case 0xD9: case 0xDD: case 0xDF:
+            case 0xE9: case 0xED: case 0xEF: case 0xF9: case 0xFD: case 0xFF:
+            case 0x05: case 0x15: case 0x25: case 0x35: case 0x45: case 0x55:
+            case 0x65: case 0x75: case 0x85: case 0x95: case 0xA5: case 0xB5:
+            case 0xC5: case 0xD5: case 0xE5: case 0xF5:
+            case 0x48: case 0x68: case 0xA7: case 0xB7:
+                m_lastCycles++; break;
+            default: break;
+        }
+    }
+    // Add 1 extra cycle for 16-bit index memory ops (X=0)
+    if (!m_modeX) {
+        switch (opcode) {
+            case 0xA2: case 0xA0: case 0xE0: case 0xC0:
+            case 0xAE: case 0xBE: case 0xAC: case 0xBC:
+            case 0x8E: case 0x8C: case 0xDA: case 0xFA:
+            case 0x5A: case 0x7A:
+                m_lastCycles++; break;
+            default: break;
+        }
+    }
+
+    // Check for pending NMI/IRQ AFTER instruction executes (correct 65816 behavior:
+    // current instruction always completes before interrupt is serviced)
+    if (m_irqPending && !(m_p & 0x04)) {
+        handleIRQ();
+        m_irqPending = false;
+    }
+    if (m_nmiPending && m_nmiEnabled) {
+        if (Logger::getInstance().isLoggingEnabled()) {
+            std::ostringstream oss;
+            oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') << m_cycles << "] "
+                << "*** NMI TRIGGERED *** PC:0x" << std::hex << std::setw(6) << std::setfill('0') << m_pc
+                << " -> Vector:0x" << (m_emulationMode ? 0xFFFA : 0xFFEA)
+                << "($" << m_memory->read16(m_emulationMode ? 0xFFFA : 0xFFEA) << ")";
+            Logger::getInstance().logCPU(oss.str());
+        }
+        handleNMI();
+        m_nmiPending = false;
+    }
+
     // Log instruction AFTER execution for VBlank loop debugging - only when exiting loop
-    // Remove repetitive logging inside the loop
-    if ((wasInWaitLoop || (m_pc >= 0x008260 && m_pc <= 0x008265)) && 
+    if (Logger::getInstance().isLoggingEnabled() &&
+        (wasInWaitLoop || (m_pc >= 0x008260 && m_pc <= 0x008265)) &&
         (m_pc < 0x008260 || m_pc > 0x008265)) {
-        // Exiting VBlank loop - log this important event
         std::ostringstream postLog;
         postLog << "[POST-EXEC] PC=$" << std::hex << std::setw(6) << std::setfill('0') << m_pc
                 << " (was=$" << std::setw(6) << pcBeforeExec << ")"
@@ -762,7 +862,6 @@ void CPU::step() {
                 << " N=" << ((m_p & 0x80) ? "1" : "0");
         Logger::getInstance().logCPU(postLog.str());
     }
-    // Do NOT log POST-EXEC when staying in VBlank loop - this is repetitive
     
     m_cycles++;
 }
@@ -771,17 +870,49 @@ void CPU::triggerNMI() {
     m_nmiPending = true;
 }
 
+void CPU::triggerIRQ() {
+    m_irqPending = true;
+}
+
+void CPU::handleIRQ() {
+    // IRQ handling for 65816 (maskable, respects I flag)
+    // Native mode: push PBR, PC high, PC low, P
+    // Emulation mode: push PC high, PC low, P (with B=0)
+    if (!m_emulationMode) {
+        pushStack(m_pbr);
+    }
+    pushStack((m_pc >> 8) & 0xFF);
+    pushStack(m_pc & 0xFF);
+    // In emulation mode, push P with B clear (distinguishes IRQ from BRK)
+    pushStack(m_emulationMode ? (m_p & ~0x10) : m_p);
+
+    m_p |= 0x04;   // Set I flag (disable further IRQs)
+    m_p &= ~0x08;  // Clear D flag (65816 always clears D on interrupt)
+    m_pbr = 0x00;  // Jump to bank 0
+
+    // IRQ vector: native mode = $FFEE/$FFEF, emulation mode = $FFFE/$FFFF
+    uint16_t vectorAddr = m_emulationMode ? 0xFFFE : 0xFFEE;
+    uint16_t irqVector = m_memory->read16(vectorAddr);
+    m_pc = irqVector;
+}
+
 void CPU::handleNMI() {
     // NMI (Non-Maskable Interrupt) handling
-    // Push PBR, PC, and status to stack (use pushStack for correct native/emulation mode handling)
-    pushStack(m_pbr);                    // Program Bank
+    // Native mode: push PBR, PC, P
+    // Emulation mode: push PC, P (no PBR; B flag clear for IRQ/NMI, set for BRK in emu)
+    if (!m_emulationMode) {
+        pushStack(m_pbr);                // Program Bank (native only)
+    }
     pushStack((m_pc >> 8) & 0xFF);       // PC high byte
     pushStack(m_pc & 0xFF);              // PC low byte
-    pushStack(m_p);                      // Status register
-    
+    // In emulation mode, B flag is clear for NMI (unlike BRK which sets it)
+    pushStack(m_emulationMode ? (m_p & ~0x10) : m_p);  // Status register
+
     // Set interrupt disable flag
     m_p |= 0x04;
-    
+    // Clear D flag (65816 always clears D on interrupt)
+    m_p &= ~0x08;
+
     // Clear PBR (interrupts always jump to bank 0)
     m_pbr = 0x00;
     
@@ -793,12 +924,13 @@ void CPU::handleNMI() {
     
     // Debug: Print NMI vector information
     static int nmiCount = 0;
-    if (nmiCount < 5) {
-        std::cout << "NMI triggered! Mode=" << (m_emulationMode ? "Emulation" : "Native")
-                  << ", VectorAddr=0x" << std::hex << vectorAddr
-                  << ", Vector=0x" << nmiVector 
-                  << ", PC=0x" << nmiVector 
-                  << ", PBR=0x" << (int)m_pbr << std::dec << std::endl;
+    if (nmiCount < 20) {
+        int ppu_scan = m_ppu ? m_ppu->getScanline() : -1;
+        int ppu_frame = m_ppu ? m_ppu->getFrameCount() : -1;
+        std::cout << "NMI triggered! #" << nmiCount+1
+                  << " scan=" << ppu_scan
+                  << " frame=" << ppu_frame
+                  << " -> vector=0x" << std::hex << nmiVector << std::dec << std::endl;
         nmiCount++;
     }
     
@@ -1108,11 +1240,13 @@ void CPU::executeInstruction(uint8_t opcode) {
         
         case 0x95: { // STA Direct Page,X
             uint8_t operand = m_memory->read8(m_address_plus_1);
-            uint16_t addr = (m_d + operand + (m_x & 0xFF)) & 0xFFFF;
+            uint16_t xValue = m_modeX ? (m_x & 0xFF) : m_x;
+            uint32_t addr = (0x00 << 16) | ((m_d + operand + xValue) & 0xFFFF);
             if (m_modeM) {
                 m_memory->write8(addr, m_a & 0xFF);
             } else {
-                write16bit(addr, m_a);
+                m_memory->write8(addr,     m_a & 0xFF);
+                m_memory->write8(addr + 1, (m_a >> 8) & 0xFF);
             }
         } break;
         
@@ -1147,22 +1281,28 @@ void CPU::executeInstruction(uint8_t opcode) {
         } break;
         
         case 0x9D: { // STA Absolute,X
-            uint16_t addr = m_memory->read16(m_address) + (m_x & (m_modeX ? 0xFF : 0xFFFF));
+            uint16_t baseAddr = m_memory->read16(m_address);
             m_pc += 2;
+            uint16_t xValue = m_modeX ? (m_x & 0xFF) : m_x;
+            uint32_t addr = ((uint32_t)m_dbr << 16) | ((baseAddr + xValue) & 0xFFFF);
             if (m_modeM) {
                 m_memory->write8(addr, m_a & 0xFF);
             } else {
-                write16bit(addr, m_a);
+                m_memory->write8(addr,     m_a & 0xFF);
+                m_memory->write8(addr + 1, (m_a >> 8) & 0xFF);
             }
         } break;
-        
+
         case 0x99: { // STA Absolute,Y
-            uint16_t addr = m_memory->read16(m_address) + (m_y & (m_modeX ? 0xFF : 0xFFFF));
+            uint16_t baseAddr = m_memory->read16(m_address);
             m_pc += 2;
+            uint16_t yValue = m_modeX ? (m_y & 0xFF) : m_y;
+            uint32_t addr = ((uint32_t)m_dbr << 16) | ((baseAddr + yValue) & 0xFFFF);
             if (m_modeM) {
                 m_memory->write8(addr, m_a & 0xFF);
             } else {
-                write16bit(addr, m_a);
+                m_memory->write8(addr,     m_a & 0xFF);
+                m_memory->write8(addr + 1, (m_a >> 8) & 0xFF);
             }
         } break;
         
@@ -1242,31 +1382,38 @@ void CPU::executeInstruction(uint8_t opcode) {
             }
         } break;
         
-        case 0x86: { // STX Zero Page
-            uint8_t addr = m_memory->read8(m_address_plus_1);
+        case 0x86: { // STX Direct Page
+            uint8_t dp = m_memory->read8(m_address_plus_1);
+            uint32_t addr = (0x00 << 16) | ((m_d + dp) & 0xFFFF);
             if (m_modeX) {
                 m_memory->write8(addr, m_x & 0xFF);
             } else {
-                write16bit(addr, m_x);
+                m_memory->write8(addr,     m_x & 0xFF);
+                m_memory->write8(addr + 1, (m_x >> 8) & 0xFF);
             }
         } break;
-        
-        case 0x96: { // STX Zero Page,Y
-            uint8_t addr = (m_memory->read8(m_address_plus_1) + (m_y & 0xFF)) & 0xFF;
+
+        case 0x96: { // STX Direct Page,Y
+            uint8_t dp = m_memory->read8(m_address_plus_1);
+            uint16_t yValue = m_modeX ? (m_y & 0xFF) : m_y;
+            uint32_t addr = (0x00 << 16) | ((m_d + dp + yValue) & 0xFFFF);
             if (m_modeX) {
                 m_memory->write8(addr, m_x & 0xFF);
             } else {
-                write16bit(addr, m_x);
+                m_memory->write8(addr,     m_x & 0xFF);
+                m_memory->write8(addr + 1, (m_x >> 8) & 0xFF);
             }
         } break;
         
         case 0x8E: { // STX Absolute
-            uint16_t addr = m_memory->read16(m_address);
+            uint16_t addr16 = m_memory->read16(m_address);
             m_pc += 2;
+            uint32_t addr = ((uint32_t)m_dbr << 16) | addr16;
             if (m_modeX) {
                 m_memory->write8(addr, m_x & 0xFF);
             } else {
-                write16bit(addr, m_x);
+                m_memory->write8(addr,     m_x & 0xFF);
+                m_memory->write8(addr + 1, (m_x >> 8) & 0xFF);
             }
         } break;
         
@@ -1346,31 +1493,38 @@ void CPU::executeInstruction(uint8_t opcode) {
             }
         } break;
         
-        case 0x84: { // STY Zero Page
-            uint8_t addr = m_memory->read8(m_address_plus_1);
+        case 0x84: { // STY Direct Page
+            uint8_t dp = m_memory->read8(m_address_plus_1);
+            uint32_t addr = (0x00 << 16) | ((m_d + dp) & 0xFFFF);
             if (m_modeX) {
                 m_memory->write8(addr, m_y & 0xFF);
             } else {
-                write16bit(addr, m_y);
+                m_memory->write8(addr,     m_y & 0xFF);
+                m_memory->write8(addr + 1, (m_y >> 8) & 0xFF);
             }
         } break;
-        
-        case 0x94: { // STY Zero Page,X
-            uint8_t addr = (m_memory->read8(m_address_plus_1) + (m_x & 0xFF)) & 0xFF;
+
+        case 0x94: { // STY Direct Page,X
+            uint8_t dp = m_memory->read8(m_address_plus_1);
+            uint16_t xValue = m_modeX ? (m_x & 0xFF) : m_x;
+            uint32_t addr = (0x00 << 16) | ((m_d + dp + xValue) & 0xFFFF);
             if (m_modeX) {
                 m_memory->write8(addr, m_y & 0xFF);
             } else {
-                write16bit(addr, m_y);
+                m_memory->write8(addr,     m_y & 0xFF);
+                m_memory->write8(addr + 1, (m_y >> 8) & 0xFF);
             }
         } break;
         
         case 0x8C: { // STY Absolute
-            uint16_t addr = m_memory->read16(m_address);
+            uint16_t addr16 = m_memory->read16(m_address);
             m_pc += 2;
+            uint32_t addr = ((uint32_t)m_dbr << 16) | addr16;
             if (m_modeX) {
                 m_memory->write8(addr, m_y & 0xFF);
             } else {
-                write16bit(addr, m_y);
+                m_memory->write8(addr,     m_y & 0xFF);
+                m_memory->write8(addr + 1, (m_y >> 8) & 0xFF);
             }
         } break;
         
@@ -3110,6 +3264,66 @@ void CPU::executeInstruction(uint8_t opcode) {
             }
         } break;
         
+        // TSB - Test and Set Bits
+        case 0x04: { // TSB Direct Page
+            uint8_t dp = m_memory->read8(m_address_plus_1);
+            uint32_t addr = (m_d + dp) & 0xFFFF;
+            if (m_modeM) {
+                uint8_t value = m_memory->read8(addr);
+                setZero(((m_a & 0xFF) & value) == 0);
+                m_memory->write8(addr, value | (m_a & 0xFF));
+            } else {
+                uint16_t value = read16bit(addr);
+                setZero((m_a & value) == 0);
+                write16bit(addr, value | m_a);
+            }
+        } break;
+
+        case 0x0C: { // TSB Absolute
+            uint16_t addr = m_memory->read16(m_address);
+            m_pc += 2;
+            uint32_t effectiveAddr = (m_dbr << 16) | addr;
+            if (m_modeM) {
+                uint8_t value = m_memory->read8(effectiveAddr);
+                setZero(((m_a & 0xFF) & value) == 0);
+                m_memory->write8(effectiveAddr, value | (m_a & 0xFF));
+            } else {
+                uint16_t value = m_memory->read16(effectiveAddr);
+                setZero((m_a & value) == 0);
+                m_memory->write16(effectiveAddr, value | m_a);
+            }
+        } break;
+
+        // TRB - Test and Reset Bits
+        case 0x14: { // TRB Direct Page
+            uint8_t dp = m_memory->read8(m_address_plus_1);
+            uint32_t addr = (m_d + dp) & 0xFFFF;
+            if (m_modeM) {
+                uint8_t value = m_memory->read8(addr);
+                setZero(((m_a & 0xFF) & value) == 0);
+                m_memory->write8(addr, value & ~(m_a & 0xFF));
+            } else {
+                uint16_t value = read16bit(addr);
+                setZero((m_a & value) == 0);
+                write16bit(addr, value & ~m_a);
+            }
+        } break;
+
+        case 0x1C: { // TRB Absolute
+            uint16_t addr = m_memory->read16(m_address);
+            m_pc += 2;
+            uint32_t effectiveAddr = (m_dbr << 16) | addr;
+            if (m_modeM) {
+                uint8_t value = m_memory->read8(effectiveAddr);
+                setZero(((m_a & 0xFF) & value) == 0);
+                m_memory->write8(effectiveAddr, value & ~(m_a & 0xFF));
+            } else {
+                uint16_t value = m_memory->read16(effectiveAddr);
+                setZero((m_a & value) == 0);
+                m_memory->write16(effectiveAddr, value & ~m_a);
+            }
+        } break;
+
         // Increment/Decrement
         case 0xE8: { // INX
             if (m_modeX) {
@@ -3358,7 +3572,31 @@ void CPU::executeInstruction(uint8_t opcode) {
                 setZeroNegative(m_a);
             }
         } break;
-        
+
+        case 0x9B: { // TXY - Transfer X to Y
+            if (m_modeX) {
+                // 8-bit index mode
+                m_y = (m_y & 0xFF00) | (m_x & 0xFF);
+                setZeroNegative8(m_y & 0xFF);
+            } else {
+                // 16-bit index mode
+                m_y = m_x;
+                setZeroNegative(m_y);
+            }
+        } break;
+
+        case 0xBB: { // TYX - Transfer Y to X
+            if (m_modeX) {
+                // 8-bit index mode
+                m_x = (m_x & 0xFF00) | (m_y & 0xFF);
+                setZeroNegative8(m_x & 0xFF);
+            } else {
+                // 16-bit index mode
+                m_x = m_y;
+                setZeroNegative(m_x);
+            }
+        } break;
+
         case 0xBA: { // TSX
             if (m_emulationMode) {
                 // Emulation mode: SP is 8-bit, always in page 1
@@ -3431,13 +3669,24 @@ void CPU::executeInstruction(uint8_t opcode) {
             uint8_t oldP = m_p;
             m_p = pullStack();
             updateModeFlags();
-            // If X flag (bit 4) changed from 0 to 1 (switching to 8-bit index mode)
+            // If X flag changed from 0 to 1 (switching to 8-bit index mode)
             // Clear high bytes of X and Y registers
             if (((oldP & 0x10) == 0) && (m_p & 0x10) && !m_emulationMode) {
                 m_x = m_x & 0xFF;
                 m_y = m_y & 0xFF;
             }
-            stackTrace();
+            // Log PLP that changes X from 1→0 in F191
+            if ((oldP & 0x10) && !(m_p & 0x10)) {
+                int fc_plp = m_ppu ? m_ppu->getFrameCount() : -1;
+                if (fc_plp == 191) {
+                    static int plpXLog = 0;
+                    if (plpXLog < 20) {
+                        fprintf(stderr, "[PLP_X] F:%d %02X:%04X P:%02X->%02X\n",
+                            fc_plp, m_pbr, (uint16_t)(m_pc-1), oldP, m_p);
+                        plpXLog++;
+                    }
+                }
+            }
         } break;
         
         // Jump/Branch Instructions
@@ -3543,32 +3792,13 @@ void CPU::executeInstruction(uint8_t opcode) {
             m_pc = addr;
         } break;
         
-        case 0x6C: { // JMP Indirect
+        case 0x6C: { // JMP (Absolute) - Absolute Indirect
             uint16_t addr = m_memory->read16(m_address);
-            // Read 16-bit pointer from DBR bank (matches data fetch semantics)
-            uint32_t pointerAddr = (m_dbr << 16) | addr;
-            uint8_t low = m_memory->read8(pointerAddr);
+            // 65816: pointer is read from bank $00 (not DBR)
+            uint32_t pointerAddr = (0x00 << 16) | addr;
+            uint8_t low  = m_memory->read8(pointerAddr);
             uint8_t high = m_memory->read8(pointerAddr + 1);
-            // Debug for tests around 01B5 (trampoline @ $7E:7000 and pointer near $xx:FFA2)
-            if ((pointerAddr & 0xFFFF) >= 0xFF00 || (m_address & 0xFFFF) >= 0x7000) {
-                std::ostringstream dbg;
-                dbg << "[JMP6C DEBUG] PBR=0x" << std::hex << (int)m_pbr
-                    << " m_address=0x" << m_address
-                    << " addr=0x" << addr
-                    << " pointerAddr=0x" << pointerAddr
-                    << " -> target=0x" << std::setw(4) << ((high << 8) | low);
-                Logger::getInstance().logCPU(dbg.str());
-            }
-            // Compatibility: some tests expect trampoline to jump to @ok at $8000 via pointer at $FFA2
-            // If WRAM pointer is unset (0x0000) and we're executing the $7E:7000 trampoline, default to $8000
-            if (((pointerAddr & 0xFF0000) == 0x7E0000 || (pointerAddr & 0xFF0000) == 0x7F0000)
-                && addr == 0xFFA2 && low == 0x00 && high == 0x00
-                && ((m_pbr << 16) | (m_address & 0xFFFF)) >= 0x7E7000
-                && ((m_pbr << 16) | (m_address & 0xFFFF)) < 0x7E8000) {
-                low = 0x00;
-                high = 0x80;
-            }
-            m_pc = (high << 8) | low;
+            m_pc = (uint16_t)((high << 8) | low);
             // PBR remains unchanged
         } break;
         
@@ -3580,92 +3810,44 @@ void CPU::executeInstruction(uint8_t opcode) {
             m_pc = addr;
         } break;
         
-        case 0xFC: { // JSR ($Absolute,X) - Indirect Long Indexed with X
-            // FC is a 3-byte instruction: FC low high
-            // m_pc currently points to the byte after FC opcode (due to m_address_plus_1 in step())
-            // Read baseAddr from the next 2 bytes
-            uint8_t baseLow = m_memory->read8(m_address);
-            uint8_t baseHigh = m_memory->read8(m_address + 1);
-            uint16_t baseAddr = (baseHigh << 8) | baseLow;
+        case 0xFC: { // JSR (Absolute,X) - Absolute Indexed Indirect (3 bytes: FC low high)
+            // Read 16-bit base address from instruction stream (m_address = current PC)
+            uint16_t baseAddr = m_memory->read16(m_address);
+            m_pc += 2; // consume 2 operand bytes; m_pc now points to byte after instruction
             uint16_t xValue = m_modeX ? (m_x & 0xFF) : m_x;
-            uint16_t addr = baseAddr + xValue;
-            // Read 24-bit pointer (low, mid, bank) from PBR bank
-            uint32_t pointerAddr = (m_pbr << 16) | addr;
-            
-            // DEBUG: Memory dump for FC instruction
-            {
-                std::ostringstream oss;
-                oss << "[FC DEBUG] baseAddr=$" << std::hex << baseAddr 
-                    << " X=$" << xValue 
-                    << " addr=$" << addr 
-                    << " pointerAddr=$" << pointerAddr
-                    << " PBR=$" << (int)m_pbr;
-                Logger::getInstance().logCPU(oss.str());
-                
-                uint8_t mem0 = m_memory->read8(pointerAddr);
-                uint8_t mem1 = m_memory->read8(pointerAddr + 1);
-                uint8_t mem2 = m_memory->read8(pointerAddr + 2);
-                oss.str("");
-                oss << "[FC DEBUG] Memory[$" << std::hex << pointerAddr 
-                    << "] = $" << (int)mem0 
-                    << " [$" << (pointerAddr+1) << "] = $" << (int)mem1
-                    << " [$" << (pointerAddr+2) << "] = $" << (int)mem2;
-                Logger::getInstance().logCPU(oss.str());
-                Logger::getInstance().flush();
-            }
-            
+            uint16_t indAddr = (uint16_t)(baseAddr + xValue);
+            // Pointer is in PBR bank; reads 16-bit target (not 24-bit — PBR unchanged)
+            uint32_t pointerAddr = ((uint32_t)m_pbr << 16) | indAddr;
             uint8_t low = m_memory->read8(pointerAddr);
-            uint8_t mid = m_memory->read8(pointerAddr + 1);
-            uint8_t bank = m_memory->read8(pointerAddr + 2);
-            
-            // If bank byte is zero and we're reading from WRAM, use PBR as bank (common pattern in test ROMs)
-            // This handles cases where the test doesn't explicitly set the bank byte
-            if (bank == 0x00 && (pointerAddr & 0xFF0000) >= 0x7E0000 && (pointerAddr & 0xFF0000) < 0x800000) {
-                bank = m_pbr;
-            }
-            
-            // DEBUG: Target address calculation
-            {
-                std::ostringstream oss;
-                uint32_t targetAddr = (bank << 16) | (mid << 8) | low;
-                oss << "[FC DEBUG] Read pointer: low=$" << std::hex << (int)low 
-                    << " mid=$" << (int)mid 
-                    << " bank=$" << (int)bank
-                    << " targetAddr=$" << targetAddr;
-                Logger::getInstance().logCPU(oss.str());
-                Logger::getInstance().flush();
-            }
-            
-            // Push return address (16-bit only, unlike JSL which pushes PBR too)
-            // m_pc currently points to FC+1 (after opcode read)
-            // FC is 3 bytes total: FC low high
-            // Return address is the address of the instruction following FC (FC+3)
-            // But RTS expects the return address - 1 (pointing to the byte before the next instruction)
-            // Similar to JSR which pushes (m_pc - 1) after reading the address
-            m_pc += 2;  // m_pc now points to FC+3
-            pushStack16(m_pc - 1);  // Push FC+2 as return address (like JSR)
-            
-            // Jump to target (PBR is updated)
-            m_pc = (mid << 8) | low;
-            m_pbr = bank;
+            uint8_t high = m_memory->read8(pointerAddr + 1);
+            // Push return address (like JSR: push m_pc - 1)
+            pushStack16(m_pc - 1);
+            // Jump within same PBR bank
+            m_pc = (uint16_t)((high << 8) | low);
             stackTrace();
         } break;
         
         case 0x40: { // RTI - Return from Interrupt
-            // Pull P, PC, and PBR from stack
+            // Emulation mode: pull P, PC (no PBR)
+            // Native mode: pull P, PC, PBR
+            uint8_t oldP = m_p;
             m_p = pullStack();
             m_pc = pullStack16();
-            m_pbr = pullStack();
-            updateModeFlags(); // Update M and X flags after status change
-            
-            static int rtiCount = 0;
-            if (rtiCount < 5) {
-                std::cout << "RTI: Restored PC=0x" << std::hex << m_pc 
-                          << ", PBR=0x" << (int)m_pbr
-                          << ", P=0x" << (int)m_p << std::dec << std::endl;
-                rtiCount++;
+            if (!m_emulationMode) {
+                m_pbr = pullStack();
             }
-            stackTrace();
+            updateModeFlags();
+
+            // Log RTI when X flag changes (possible source of P corruption)
+            int fc_rti = m_ppu ? m_ppu->getFrameCount() : -1;
+            if (fc_rti >= 185 && fc_rti <= 195) {
+                static int rtiLogCount = 0;
+                if (rtiLogCount < 50) {
+                    fprintf(stderr, "[RTI] F:%d P:%02X->%02X PC=%02X:%04X SP=%04X M=%d X=%d\n",
+                        fc_rti, oldP, m_p, m_pbr, m_pc, m_sp, m_modeM?1:0, m_modeX?1:0);
+                    rtiLogCount++;
+                }
+            }
         } break;
         
         case 0x60: { // RTS - Return from Subroutine
@@ -3689,14 +3871,11 @@ void CPU::executeInstruction(uint8_t opcode) {
         case 0x78: m_p |= 0x04; break; // SEI - Set Interrupt Disable
         
         case 0x9C: { // STZ Absolute
-            uint16_t addr = m_memory->read16(m_address);
+            uint16_t addr16 = m_memory->read16(m_address);
             m_pc += 2;
-            if (m_modeM) {
-                m_memory->write8(addr, 0x00);
-            } else {
-                m_memory->write8(addr, 0x00);
-                m_memory->write8(addr + 1, 0x00);
-            }
+            uint32_t addr = ((uint32_t)m_dbr << 16) | addr16;
+            m_memory->write8(addr, 0x00);
+            if (!m_modeM) m_memory->write8(addr + 1, 0x00);
         } break;
         
         case 0xFB: { // XCE - Exchange Carry and Emulation bit
@@ -3748,8 +3927,21 @@ void CPU::executeInstruction(uint8_t opcode) {
         // 65816 specific instructions
         case 0xC2: { // REP - Reset Status Bits
             uint8_t mask = m_memory->read8(m_address_plus_1);
+            uint8_t oldP = m_p;
             m_p = m_p & ~mask;
             updateModeFlags();
+            // Log when X flag changes from 1→0 (8→16 bit) during SMW crash investigation
+            if ((oldP & 0x10) && !(m_p & 0x10)) {
+                int fc_rep = m_ppu ? m_ppu->getFrameCount() : -1;
+                if (fc_rep == 191) {
+                    static int repXLog = 0;
+                    if (repXLog < 20) {
+                        fprintf(stderr, "[REP_X] F:%d %02X:%04X REP#$%02X P:%02X->%02X\n",
+                            fc_rep, m_pbr, (uint16_t)(m_pc-2), mask, oldP, m_p);
+                        repXLog++;
+                    }
+                }
+            }
         } break;
         case 0xE2: { // SEP - Set Status Bits
             uint8_t mask = m_memory->read8(m_address_plus_1);
@@ -4267,7 +4459,14 @@ void CPU::executeInstruction(uint8_t opcode) {
         
         // Special Instructions
         case 0xEA: break; // NOP
-        case 0x9E: m_memory->write8(m_memory->read16(m_address) + m_x, 0); m_pc += 2; break; // STZ Absolute,X
+        case 0x9E: { // STZ Absolute,X
+            uint16_t base = m_memory->read16(m_address);
+            m_pc += 2;
+            uint16_t xValue = m_modeX ? (m_x & 0xFF) : m_x;
+            uint32_t addr = ((uint32_t)m_dbr << 16) | ((base + xValue) & 0xFFFF);
+            m_memory->write8(addr, 0);
+            if (!m_modeM) m_memory->write8(addr + 1, 0);
+        } break;
         case 0xFE: { // INC Absolute,X
             uint16_t addr = m_memory->read16(m_address);
             m_pc += 2;
@@ -4292,16 +4491,16 @@ void CPU::executeInstruction(uint8_t opcode) {
                 pushStack16(m_y);
             stackTrace();
             break; // PHY
-        case 0x7A: 
+        case 0x7A: // PLY
             if(m_modeX) {
-                m_y = pullStack();
+                m_y = (m_y & 0xFF00) | pullStack();
                 setZeroNegative8(m_y & 0xFF);
             } else {
                 m_y = pullStack16();
                 setZeroNegative(m_y);
             }
             stackTrace();
-            break; // PLY
+            break;
         case 0xDA: 
             if(m_modeX)
                 pushStack(m_x&0xFF);
@@ -4309,16 +4508,16 @@ void CPU::executeInstruction(uint8_t opcode) {
                 pushStack16(m_x);
             stackTrace();
             break; // PHX
-        case 0xFA: 
+        case 0xFA: // PLX
             if(m_modeX) {
-                m_x = pullStack();
+                m_x = (m_x & 0xFF00) | pullStack();
                 setZeroNegative8(m_x & 0xFF);
             } else {
                 m_x = pullStack16();
                 setZeroNegative(m_x);
             }
             stackTrace();
-            break; // PLX
+            break;
         case 0x5B: { // TCD - Transfer 16-bit A to D
             // Transfer 16-bit A to Direct Page register
             m_d = m_a;
@@ -4327,12 +4526,12 @@ void CPU::executeInstruction(uint8_t opcode) {
             // Set Zero and Negative flags based on D register
             setZeroNegative(m_d);
         } break;
-        case 0x1B: { // TCS - Transfer A to SP
+        case 0x1B: { // TCS - Transfer C (16-bit A) to SP; no flags affected
             if (m_emulationMode) {
-                // Emulation mode: Transfer 8-bit A to 8-bit SP
-                m_sp = m_a & 0xFF;
+                // Emulation mode: SP high byte forced to $01, only low byte from A
+                m_sp = 0x0100 | (m_a & 0xFF);
             } else {
-                // Native mode: Transfer 16-bit A to 16-bit SP
+                // Native mode: full 16-bit transfer (always uses 16-bit A regardless of M)
                 m_sp = m_a;
             }
         } break;
@@ -4380,14 +4579,19 @@ void CPU::executeInstruction(uint8_t opcode) {
         } break;
         
         // Additional missing instructions
-        case 0x64: { // STZ Zero Page
-            uint8_t addr = m_memory->read8(m_address_plus_1);
+        case 0x64: { // STZ Direct Page
+            uint8_t dp = m_memory->read8(m_address_plus_1);
+            uint32_t addr = (0x00 << 16) | ((m_d + dp) & 0xFFFF);
             m_memory->write8(addr, 0);
+            if (!m_modeM) m_memory->write8(addr + 1, 0);
         } break;
-        
-        case 0x74: { // STZ Zero Page,X
-            uint8_t addr = (m_memory->read8(m_address_plus_1) + (m_x & 0xFF)) & 0xFF;
+
+        case 0x74: { // STZ Direct Page,X
+            uint8_t dp = m_memory->read8(m_address_plus_1);
+            uint16_t xValue = m_modeX ? (m_x & 0xFF) : m_x;
+            uint32_t addr = (0x00 << 16) | ((m_d + dp + xValue) & 0xFFFF);
             m_memory->write8(addr, 0);
+            if (!m_modeM) m_memory->write8(addr + 1, 0);
         } break;
         
         case 0xB1: { // LDA (Direct Page),Y - Direct Page Indirect Indexed Y
@@ -4474,17 +4678,17 @@ void CPU::executeInstruction(uint8_t opcode) {
             uint8_t addrLow = m_memory->read8(m_address_plus_1);
             uint8_t addrMid = m_memory->read8(m_address_plus_1);
             uint8_t addrBank = m_memory->read8(m_address_plus_1);
-            
+
             // Calculate full 24-bit address + X
             uint32_t addr = (addrBank << 16) | (addrMid << 8) | addrLow;
             addr += (m_x & (m_modeX ? 0xFF : 0xFFFF));
-            
-            // Write A to memory (handle 8-bit/16-bit modes)
+
+            // Write A to memory using full 24-bit address (NOT masked to 16 bits)
             if (m_modeM) {
-                m_memory->write8(addr & 0xFFFF, m_a & 0xFF);
+                m_memory->write8(addr, m_a & 0xFF);
             } else {
-                m_memory->write8(addr & 0xFFFF, m_a & 0xFF);
-                m_memory->write8((addr + 1) & 0xFFFF, (m_a >> 8) & 0xFF);
+                m_memory->write8(addr, m_a & 0xFF);
+                m_memory->write8(addr + 1, (m_a >> 8) & 0xFF);
             }
         } break;
         
@@ -4587,53 +4791,101 @@ void CPU::executeInstruction(uint8_t opcode) {
         } break;
         
         // Store variants
-        case 0x81: { // STA (Direct Page,X)
+        case 0x81: { // STA (Direct Page,X) - DP Indexed Indirect
             uint8_t dp = m_memory->read8(m_address_plus_1);
-            uint16_t addr = read16bit((dp + (m_x & 0xFF)) & 0xFF);
+            uint16_t xValue = m_modeX ? (m_x & 0xFF) : m_x;
+            uint32_t ptrAddr = (0x00 << 16) | ((m_d + dp + xValue) & 0xFFFF);
+            uint16_t ptr = m_memory->read16(ptrAddr);
+            uint32_t addr = (m_dbr << 16) | ptr;
             if (m_modeM) {
                 m_memory->write8(addr, m_a & 0xFF);
             } else {
-                write16bit(addr, m_a);
+                m_memory->write8(addr,     m_a & 0xFF);
+                m_memory->write8(addr + 1, (m_a >> 8) & 0xFF);
             }
         } break;
-        
-        case 0x87: { // STA [Direct Page]
-            uint8_t dp = m_memory->read8(m_address_plus_1);
-            uint16_t addr = read16bit(dp);
+
+        case 0x83: { // STA Stack Relative
+            uint8_t offset = m_memory->read8(m_address_plus_1);
+            uint32_t addr = (0x00 << 16) | ((m_sp + offset) & 0xFFFF);
             if (m_modeM) {
                 m_memory->write8(addr, m_a & 0xFF);
             } else {
-                write16bit(addr, m_a);
+                m_memory->write8(addr,     m_a & 0xFF);
+                m_memory->write8(addr + 1, (m_a >> 8) & 0xFF);
             }
         } break;
-        
-        case 0x91: { // STA (Direct Page),Y
+
+        case 0x87: { // STA [Direct Page] - DP Indirect Long
             uint8_t dp = m_memory->read8(m_address_plus_1);
-            uint16_t addr = read16bit(dp) + (m_y & (m_modeX ? 0xFF : 0xFFFF));
+            uint32_t ptrAddr = (0x00 << 16) | ((m_d + dp) & 0xFFFF);
+            uint8_t addrLow  = m_memory->read8(ptrAddr);
+            uint8_t addrHigh = m_memory->read8(ptrAddr + 1);
+            uint8_t addrBank = m_memory->read8(ptrAddr + 2);
+            uint32_t addr = ((uint32_t)addrBank << 16) | ((uint32_t)addrHigh << 8) | addrLow;
             if (m_modeM) {
                 m_memory->write8(addr, m_a & 0xFF);
             } else {
-                write16bit(addr, m_a);
+                m_memory->write8(addr,     m_a & 0xFF);
+                m_memory->write8(addr + 1, (m_a >> 8) & 0xFF);
             }
         } break;
-        
-        case 0x92: { // STA (Direct Page)
+
+        case 0x91: { // STA (Direct Page),Y - DP Indirect Indexed Y
             uint8_t dp = m_memory->read8(m_address_plus_1);
-            uint16_t addr = read16bit(dp);
+            uint32_t ptrAddr = (0x00 << 16) | ((m_d + dp) & 0xFFFF);
+            uint16_t ptr = m_memory->read16(ptrAddr);
+            uint16_t yValue = m_modeX ? (m_y & 0xFF) : m_y;
+            uint32_t addr = ((uint32_t)m_dbr << 16) | ((ptr + yValue) & 0xFFFF);
             if (m_modeM) {
                 m_memory->write8(addr, m_a & 0xFF);
             } else {
-                write16bit(addr, m_a);
+                m_memory->write8(addr,     m_a & 0xFF);
+                m_memory->write8(addr + 1, (m_a >> 8) & 0xFF);
             }
         } break;
-        
-        case 0x97: { // STA [Direct Page],Y
+
+        case 0x92: { // STA (Direct Page) - DP Indirect
             uint8_t dp = m_memory->read8(m_address_plus_1);
-            uint16_t addr = read16bit(dp) + (m_y & (m_modeX ? 0xFF : 0xFFFF));
+            uint32_t ptrAddr = (0x00 << 16) | ((m_d + dp) & 0xFFFF);
+            uint16_t ptr = m_memory->read16(ptrAddr);
+            uint32_t addr = ((uint32_t)m_dbr << 16) | ptr;
             if (m_modeM) {
                 m_memory->write8(addr, m_a & 0xFF);
             } else {
-                write16bit(addr, m_a);
+                m_memory->write8(addr,     m_a & 0xFF);
+                m_memory->write8(addr + 1, (m_a >> 8) & 0xFF);
+            }
+        } break;
+
+        case 0x93: { // STA (Stack Relative,S),Y - SR Indirect Indexed Y
+            uint8_t offset = m_memory->read8(m_address_plus_1);
+            uint32_t ptrAddr = (0x00 << 16) | ((m_sp + offset) & 0xFFFF);
+            uint16_t ptr = m_memory->read16(ptrAddr);
+            uint16_t yValue = m_modeX ? (m_y & 0xFF) : m_y;
+            uint32_t addr = ((uint32_t)m_dbr << 16) | ((ptr + yValue) & 0xFFFF);
+            if (m_modeM) {
+                m_memory->write8(addr, m_a & 0xFF);
+            } else {
+                m_memory->write8(addr,     m_a & 0xFF);
+                m_memory->write8(addr + 1, (m_a >> 8) & 0xFF);
+            }
+        } break;
+
+        case 0x97: { // STA [Direct Page],Y - DP Indirect Long Indexed Y
+            uint8_t dp = m_memory->read8(m_address_plus_1);
+            uint32_t ptrAddr = (0x00 << 16) | ((m_d + dp) & 0xFFFF);
+            uint8_t addrLow  = m_memory->read8(ptrAddr);
+            uint8_t addrHigh = m_memory->read8(ptrAddr + 1);
+            uint8_t addrBank = m_memory->read8(ptrAddr + 2);
+            uint32_t base = ((uint32_t)addrBank << 16) | ((uint32_t)addrHigh << 8) | addrLow;
+            uint16_t yValue = m_modeX ? (m_y & 0xFF) : m_y;
+            uint32_t addr = base + yValue;
+            if (m_modeM) {
+                m_memory->write8(addr, m_a & 0xFF);
+            } else {
+                m_memory->write8(addr,     m_a & 0xFF);
+                m_memory->write8(addr + 1, (m_a >> 8) & 0xFF);
             }
         } break;
         
@@ -5153,22 +5405,21 @@ void CPU::executeInstruction(uint8_t opcode) {
         
         case 0xE3: { // SBC Stack Relative (sr,S) - Direct Stack Relative
             uint8_t offset = m_memory->read8(m_address_plus_1);
-            
             // Stack Relative: SP + offset (stack is always in Bank $00)
             uint32_t stackAddr = (0x00 << 16) | ((m_sp + offset) & 0xFFFF);
-            
             if (m_modeM) {
-                // 8-bit mode
                 uint8_t value = m_memory->read8(stackAddr);
-                uint16_t result = (m_a & 0xFF) - value - (isCarry() ? 0 : 1);
+                uint8_t a8 = m_a & 0xFF;
+                uint16_t result = a8 - value - (isCarry() ? 0 : 1);
                 setCarry(result < 0x100);
+                setOverflow(((a8 ^ value) & (a8 ^ (uint8_t)result) & 0x80) != 0);
                 m_a = (m_a & 0xFF00) | (result & 0xFF);
                 setZeroNegative8(result & 0xFF);
             } else {
-                // 16-bit mode
                 uint16_t value = m_memory->read16(stackAddr);
                 uint32_t result = m_a - value - (isCarry() ? 0 : 1);
                 setCarry(result < 0x10000);
+                setOverflow(((m_a ^ value) & (m_a ^ (uint16_t)result) & 0x8000) != 0);
                 m_a = result & 0xFFFF;
                 setZeroNegative(m_a);
             }
@@ -5223,22 +5474,23 @@ void CPU::executeInstruction(uint8_t opcode) {
             uint32_t dataAddr = (bank << 16) | (addr & 0xFFFF);
             
             if (m_modeM) {
-                // 8-bit mode
                 uint8_t value = m_memory->read8(dataAddr);
-                uint16_t result = (m_a & 0xFF) - value - (isCarry() ? 0 : 1);
+                uint8_t a8 = m_a & 0xFF;
+                uint16_t result = a8 - value - (isCarry() ? 0 : 1);
                 setCarry(result < 0x100);
+                setOverflow(((a8 ^ value) & (a8 ^ (uint8_t)result) & 0x80) != 0);
                 m_a = (m_a & 0xFF00) | (result & 0xFF);
                 setZeroNegative8(result & 0xFF);
             } else {
-                // 16-bit mode
                 uint16_t value = m_memory->read16(dataAddr);
                 uint32_t result = m_a - value - (isCarry() ? 0 : 1);
                 setCarry(result < 0x10000);
+                setOverflow(((m_a ^ value) & (m_a ^ (uint16_t)result) & 0x8000) != 0);
                 m_a = result & 0xFFFF;
                 setZeroNegative(m_a);
             }
         } break;
-        
+
         case 0xED: { // SBC Absolute
             uint16_t addr = m_memory->read16(m_address);
             m_pc += 2;
@@ -5426,7 +5678,8 @@ void CPU::executeInstruction(uint8_t opcode) {
         
         case 0xF9: { // SBC Absolute,Y
             uint16_t addr = m_memory->read16(m_address_plus_1);
-            
+            m_pc++; // read16 reads 2 bytes, m_address_plus_1 already incremented once
+
             // Absolute,Y addressing: DBR:addr + Y (can cross bank boundary)
             uint16_t yValue = m_modeX ? (m_y & 0xFF) : m_y;
             uint32_t dataAddr = (m_dbr << 16) + addr + yValue;
@@ -5453,7 +5706,8 @@ void CPU::executeInstruction(uint8_t opcode) {
         
         case 0xFD: { // SBC Absolute,X
             uint16_t addr = m_memory->read16(m_address_plus_1);
-            
+            m_pc++; // read16 reads 2 bytes, m_address_plus_1 already incremented once
+
             // Absolute,X addressing: DBR:addr + X (can cross bank boundary)
             uint16_t xValue = m_modeX ? (m_x & 0xFF) : m_x;
             uint32_t dataAddr = (m_dbr << 16) + addr + xValue;
@@ -5557,41 +5811,63 @@ void CPU::executeInstruction(uint8_t opcode) {
         } break;
         
         case 0x6B: { // RTL - Return from Subroutine Long
-            stackTrace();
-            // Pull in reverse order of push: low byte (last pushed), high byte, then PBR (first pushed)
+            uint16_t spBefore = m_sp;
             uint8_t low = pullStack();
             uint8_t high = pullStack();
+            uint8_t bank = pullStack();
             uint16_t returnAddr = ((high << 8) | low) + 1;
-            
-            
+
+            // Diagnostic: detect suspicious return bank OR stack near top
+            if (bank >= 0x40 && bank <= 0x7D) {
+                int fc_rtl = m_ppu ? m_ppu->getFrameCount() : -1;
+                fprintf(stderr, "[RTL_BAD] F:%d from %02X:%04X -> %02X:%04X SPbefore=%04X SPafter=%04X\n",
+                        fc_rtl, m_pbr, m_pc, bank, returnAddr, spBefore, m_sp);
+                // Dump stack area
+                fprintf(stderr, "  Stack[$01F8..01FF]:");
+                for (int i = 0x1F8; i <= 0x1FF; i++) fprintf(stderr, " %02X", m_memory->read8(i));
+                fprintf(stderr, "\n");
+            }
+
             m_pc = returnAddr;
-            m_pbr = pullStack();
-            stackTrace();
+            m_pbr = bank;
         } break;
         
         case 0x22: { // JSL - Jump to Subroutine Long
-            stackTrace();
             uint8_t addrLow = m_memory->read8(m_address_plus_1);
             uint8_t addrMid = m_memory->read8(m_address_plus_1);
             uint8_t addrBank = m_memory->read8(m_address_plus_1);
-            
-            // Push return address (16-bit) and PBR
-            // After step() reads opcode, m_pc points to low byte
-            // After reading 3 bytes with m_address_plus_1, m_pc has been incremented 3 times
-            // m_pc now points to the byte after the last operand (bank byte)
-            // Return address for JSL should be the address of the last operand byte (bank byte)
-            // The bank byte is at m_pc - 1, so return address is m_pc - 1
-            // Standard SNES: JSL pushes PBR first, then high byte, then low byte
+
+            // Return address = address of the last operand byte (bank byte) = m_pc - 1
             uint16_t returnAddr = (m_pc - 1) & 0xFFFF;
-            
+
             // Push PBR first, then return address (high byte, then low byte)
             pushStack(m_pbr);
-            pushStack((returnAddr >> 8) & 0xFF); // Push high byte first
-            pushStack(returnAddr & 0xFF);        // Push low byte second
-            
+            pushStack((returnAddr >> 8) & 0xFF);
+            pushStack(returnAddr & 0xFF);
+
+            // Diagnostic: log any JSL that pushes bank >= $40 (suspicious)
+            if (m_pbr >= 0x40 && m_pbr <= 0x7D) {
+                int fc_jsl = m_ppu ? m_ppu->getFrameCount() : -1;
+                static int jslSusCount = 0;
+                if (jslSusCount < 20) {
+                    fprintf(stderr, "[JSL_SUS] F:%d from %02X:%04X -> %02X:%04X ret=%02X:%04X SP=%04X\n",
+                        fc_jsl, m_pbr, (uint16_t)(m_pc-4), addrBank, (uint16_t)((addrMid<<8)|addrLow), m_pbr, returnAddr, m_sp);
+                    jslSusCount++;
+                }
+            }
+            // Also log JSL calls where TARGET bank is suspicious
+            if (addrBank >= 0x40 && addrBank <= 0x7D) {
+                int fc_jsl = m_ppu ? m_ppu->getFrameCount() : -1;
+                static int jslTgtCount = 0;
+                if (jslTgtCount < 20) {
+                    fprintf(stderr, "[JSL_TGT] F:%d from %02X:%04X -> %02X:%04X SP=%04X\n",
+                        fc_jsl, m_pbr, (uint16_t)(m_pc-4), addrBank, (uint16_t)((addrMid<<8)|addrLow), m_sp);
+                    jslTgtCount++;
+                }
+            }
+
             m_pc = (addrMid << 8) | addrLow;
             m_pbr = addrBank;
-            stackTrace();
         } break;
         
         case 0xDC: { // JMP [Absolute] - reads 24-bit pointer from absolute address
@@ -5696,15 +5972,14 @@ void CPU::executeInstruction(uint8_t opcode) {
         // Processor status
         case 0x02: { // COP - Co-processor
             m_pc++; // Skip signature byte (PC already incremented after opcode fetch)
-            // Push PBR, PC, and P
-            pushStack(m_pbr);
-            pushStack16(m_pc);
-            // In emulation mode, set B flag when pushing P. In native mode, push P as-is
-            if (m_emulationMode) {
-                pushStack(m_p | 0x10); // B flag set in emulation mode
-            } else {
-                pushStack(m_p); // No B flag in native mode
+            // Native mode: push PBR, PC+2, P
+            // Emulation mode: push PC+2, P — no PBR push (6502 compat)
+            if (!m_emulationMode) {
+                pushStack(m_pbr);
             }
+            pushStack16(m_pc);
+            // COP never sets B flag (unlike BRK); push P as-is in both modes
+            pushStack(m_p);
             m_p &= ~0x08; // Clear D flag
             m_p |= 0x04; // Set I flag
             m_pbr = 0x00; // Clear program bank
@@ -5729,28 +6004,38 @@ void CPU::executeInstruction(uint8_t opcode) {
         } break;
         
         case 0x00: { // BRK
-            // Debug: Log BRK execution with PC before BRK
-            std::cout << "CPU: BRK executed at PC=0x" << std::hex << m_address 
+            // Debug: Log BRK execution with recent PC history
+            std::cout << "CPU: BRK executed at PC=0x" << std::hex << m_address
                       << " (before BRK, PC was 0x" << (m_address - 1) << ")" << std::dec << std::endl;
-            
-            // Treat BRK as NOP to avoid infinite loops
+            std::cout << "  PC History (recent->old): ";
+            for (uint32_t i = 0; i < LOOP_HISTORY_SIZE; i++) {
+                uint32_t idx = (m_historyIndex - 1 - i + LOOP_HISTORY_SIZE) % LOOP_HISTORY_SIZE;
+                std::cout << "0x" << std::hex << m_pcHistory[idx] << " ";
+            }
+            std::cout << std::dec << std::endl;
+
             m_pc++; // Skip signature byte (PC already incremented after opcode fetch)
-            // No other processing - just continue execution
-            // Push PBR, PC, and P
-            pushStack(m_pbr);
+            // Native mode: push PBR, PC+2, P
+            // Emulation mode: push PC+2, P (B=1) — no PBR push (6502 compat)
+            if (!m_emulationMode) {
+                pushStack(m_pbr);
+            }
             pushStack16(m_pc);
-            // In emulation mode, set B flag when pushing P. In native mode, push P as-is
             if (m_emulationMode) {
                 pushStack(m_p | 0x10); // B flag set in emulation mode
             } else {
-                pushStack(m_p); // No B flag in native mode
+                pushStack(m_p & ~0x10); // B flag clear (X flag) in native mode
             }
             m_p &= ~0x08; // Clear D flag
             m_p |= 0x04; // Set I flag
             m_pbr = 0x00; // Clear program bank
             // BRK vector: 0xFFFE-0xFFFF (emulation) or 0xFFE6-0xFFE7 (native)
             uint16_t vectorAddr = m_emulationMode ? 0xFFFE : 0xFFE6;
-            uint16_t brkVector = m_memory->read16(vectorAddr);
+            uint8_t vLo = m_memory->read8(vectorAddr);
+            uint8_t vHi = m_memory->read8(vectorAddr + 1);
+            uint16_t brkVector = vLo | (vHi << 8);
+            fprintf(stderr, "[BRK_VEC] mode=%s vec_addr=$%04X read lo=%02X hi=%02X -> $%04X\n",
+                m_emulationMode ? "emu" : "nat", vectorAddr, vLo, vHi, brkVector);
             
             // Debug: Print BRK vector information
             static int brkCount = 0;
