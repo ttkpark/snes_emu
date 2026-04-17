@@ -333,11 +333,19 @@ void PPU::step() {
         if (m_scanline == vblankStart) {
             m_nmiFlag = true;  // Set NMI flag when VBlank starts
             m_nmiAlreadyFiredThisVBlank = false;  // Reset per-VBlank guard
-            static int vblankNmiCount = 0;
-            if (vblankNmiCount < 20) {
-                fprintf(stderr, "[VBLANK-NMI] F:%d scan=%d nmiEnabled=%d\n",
-                    frameCount, m_scanline, m_nmiEnabled);
-                vblankNmiCount++;
+            // Log NMI state at key frames only (avoid flood)
+            if (frameCount < 5 || frameCount == 100 || frameCount == 200 ||
+                frameCount == 400 || frameCount == 600 || frameCount == 1000 ||
+                frameCount == 2000 || frameCount == 3000 || frameCount == 5000) {
+                fprintf(stderr, "[VBLANK-NMI] F:%d scan=%d nmiEnabled=%d irqMode=%d\n",
+                    frameCount, m_scanline, m_nmiEnabled, m_irqMode);
+            }
+            // Log all NMI enable/disable transitions
+            static bool prevNmiLogged = false;
+            if (m_nmiEnabled != prevNmiLogged) {
+                fprintf(stderr, "[NMI-TRANSITION] F:%d %d->%d\n",
+                    frameCount, prevNmiLogged, m_nmiEnabled);
+                prevNmiLogged = m_nmiEnabled;
             }
             // Toggle interlace field bit each frame when $2133 bit0 (INTERLACE) is set
             if (m_setini & 0x01) {
