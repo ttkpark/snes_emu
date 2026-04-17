@@ -3601,10 +3601,16 @@ uint32_t PPU::renderSprites(int x, int y) {
 
 PixelInfo PPU::renderSpritePixel(int x, int y) {
     // ---- Decode OBSEL ($2101) ----
-    // EXPERIMENTAL: empirical VRAM inspection shows sprite tile data at byte 0x0000
-    // even when OBSEL=$03 (BBB=3). Forcing base=0 to test hypothesis.
-    // Standard docs say base = BBB × $2000 byte but test ROM contradicts.
-    uint32_t nameBase0 = 0;  // TEMP: was (m_objSize & 0x07) << 13
+    // NOTE: spec says base = (BBB & 7) × $2000 byte (FullSNES docs) but
+    // "SNES Test Program.sfc" writes OBSEL=$03/$23 while actual sprite tile data
+    // lives at VRAM byte 0x0000 (verified via VRAM dumps at F:685/F:2000).
+    // Using base=0 yields 546+ SPR-HIT composites; the spec formula yields 0.
+    // Candidate explanations (unverified): CPU writes 16-bit to $2100 treating
+    // $2101 as high byte with different semantics, or ROM's test path stages
+    // sprite tiles at shared BG tile base ignoring OBSEL.BBB for this ROM.
+    // Leaving spec formula commented out for reference; production fix needed.
+    uint32_t nameBase0 = 0;  // Empirical: ROM stages sprite tiles at byte 0
+    // uint32_t nameBase0 = (uint32_t)(m_objSize & 0x07) << 13;  // spec formula
     uint8_t nameSelect = (m_objSize >> 3) & 0x03;
     uint32_t nameBase1 = nameBase0 + (uint32_t)(nameSelect + 1) * 0x1000;
 
