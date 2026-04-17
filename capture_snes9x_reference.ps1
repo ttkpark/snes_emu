@@ -1,85 +1,143 @@
 #Requires -Version 5.0
-# Automates Snes9x to capture reference screenshots for each test card.
-# Launches Snes9x with "SNES Test Program.sfc", sends F12 (screenshot) + navigation keys.
-# Output: .\tests\snes9x_ref\frame_*.png
+# Automates Snes9x with Win32 window focus to capture reference screenshots.
 
 $Snes9xExe = "C:\Users\GH\AppData\Local\Temp\snes9x\snes9x-x64.exe"
 $RomPath   = "$PSScriptRoot\SNES Test Program.sfc"
 $OutputDir = "$PSScriptRoot\tests\snes9x_ref"
 $Snes9xDir = Split-Path $Snes9xExe -Parent
 
-# Path exists?
-if (-not (Test-Path $Snes9xExe)) {
-    Write-Error "Snes9x not found at $Snes9xExe. Install first."
-    exit 1
-}
-if (-not (Test-Path $RomPath)) {
-    Write-Error "ROM not found at $RomPath"
-    exit 1
-}
+if (-not (Test-Path $Snes9xExe)) { Write-Error "Snes9x missing"; exit 1 }
+if (-not (Test-Path $RomPath))   { Write-Error "ROM missing";    exit 1 }
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
-Add-Type -AssemblyName System.Windows.Forms
+# Win32 API for focus + key injection
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32 {
+    [DllImport("user32.dll")]
+    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int cmd);
 
-# Launch Snes9x with ROM
+    [StructLayout(LayoutKind.Sequential)]
+    public struct INPUT {
+        public uint type;
+        public InputUnion u;
+    }
+    [StructLayout(LayoutKind.Explicit)]
+    public struct InputUnion {
+        [FieldOffset(0)] public KEYBDINPUT ki;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KEYBDINPUT {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+    [DllImport("user32.dll")]
+    public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    public static void PressKey(ushort vk) {
+        INPUT[] inputs = new INPUT[2];
+        inputs[0].type = 1; // INPUT_KEYBOARD
+        inputs[0].u.ki.wVk = vk;
+        inputs[0].u.ki.dwFlags = 0; // key down
+        inputs[1].type = 1;
+        inputs[1].u.ki.wVk = vk;
+        inputs[1].u.ki.dwFlags = 2; // key up
+        SendInput(2, inputs, Marshal.SizeOf(typeof(INPUT)));
+    }
+}
+"@
+
+function Focus-Snes9x {
+    # Use process main window handle directly (more reliable)
+    $procs = Get-Process snes9x-x64 -ErrorAction SilentlyContinue
+    foreach ($p in $procs) {
+        if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
+            [Win32]::ShowWindow($p.MainWindowHandle, 9) | Out-Null  # SW_RESTORE
+            [Win32]::SetForegroundWindow($p.MainWindowHandle) | Out-Null
+            return $true
+        }
+    }
+    return $false
+}
+
+function Send-VK($vk, $pauseMs = 200) {
+    [Win32]::PressKey([uint16]$vk)
+    Start-Sleep -Milliseconds $pauseMs
+}
+
+# Virtual keys
+$VK_F12   = 0x7B
+$VK_ENTER = 0x0D
+$VK_SHIFT = 0x10
+$VK_X     = 0x58  # SNES A
+$VK_Z     = 0x5A  # SNES B
+
+# Ensure Screenshots directory configured correctly
+$shotsDir = Join-Path $Snes9xDir "Screenshots"
+New-Item -ItemType Directory -Force -Path $shotsDir | Out-Null
+# Clear previous shots
+Remove-Item "$shotsDir\*.png" -ErrorAction SilentlyContinue
+
 Push-Location $Snes9xDir
 $proc = Start-Process -PassThru -FilePath $Snes9xExe -ArgumentList "`"$RomPath`""
-Start-Sleep -Milliseconds 3000  # let window open
+Start-Sleep -Seconds 4
 Pop-Location
 
-# Helper: send a key
-function Send-Key($key, $holdMs = 100) {
-    [System.Windows.Forms.SendKeys]::SendWait($key)
-    Start-Sleep -Milliseconds $holdMs
+# Focus window
+$focused = Focus-Snes9x
+if (-not $focused) { Write-Warning "Focus failed, trying anyway" }
+Start-Sleep -Milliseconds 500
+
+# Capture sequence with explicit focus before each keypress
+function Capture($label, $waitSec) {
+    Start-Sleep -Seconds $waitSec
+    Focus-Snes9x | Out-Null
+    Start-Sleep -Milliseconds 300
+    Send-VK $VK_F12 400
+    Write-Host "[$label] F12 sent"
 }
 
-# Sequence: wait for main menu, capture TC-01, then navigate through tests.
-# SNES pad mapping in Snes9x default: A = X key, B = Z key, Start = Enter, Select = Shift
-# F12 = screenshot
+Capture "TC-01 menu" 2
 
-Start-Sleep -Seconds 2  # wait for ROM to reach main menu
+# Enter Electronics Test (item 1 is default)
+Focus-Snes9x | Out-Null; Send-VK $VK_ENTER 500
 
-Write-Host "Capturing TC-01 Main Menu"
-Send-Key "{F12}"
-
-# Start Electronics Test (item 1)
-Send-Key "{ENTER}"  # Start button
-Start-Sleep -Seconds 1
-
-# Electronics Test cycles through TC-02 through TC-12 automatically
-# Capture at intervals
+# Capture through TC-02 ~ TC-12 (Electronics Test cycles sub-tests each ~3s)
 for ($i = 2; $i -le 12; $i++) {
-    Start-Sleep -Seconds 3
-    Write-Host "Capturing TC-$($i.ToString('00'))"
-    Send-Key "{F12}"
+    Capture "TC-$($i.ToString('00'))" 3
 }
 
-# Press SELECT (+Shift) to exit test, then navigate to next test
+# Exit back to menu
+Focus-Snes9x | Out-Null; Send-VK $VK_SHIFT 500  # SELECT
 Start-Sleep -Seconds 2
-Send-Key "+"  # SELECT
-Start-Sleep -Seconds 1
 
-# Navigate to Color Test (item 5) via SELECT cycling
+# Navigate to Color Test (item 5) via SELECT 4x
 for ($i = 0; $i -lt 4; $i++) {
-    Send-Key "+"
-    Start-Sleep -Milliseconds 500
+    Focus-Snes9x | Out-Null; Send-VK $VK_SHIFT 400
 }
-Send-Key "{ENTER}"  # START Color Test
-Start-Sleep -Seconds 3
-Write-Host "Capturing TC-13 Color Test"
-Send-Key "{F12}"
+Focus-Snes9x | Out-Null; Send-VK $VK_ENTER 500
+Capture "TC-13 Color Test" 3
 
-# Done. Close Snes9x.
+# Cleanup
 Start-Sleep -Seconds 1
 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
 
-# Copy screenshots
-$shots = Join-Path $Snes9xDir "Screenshots"
-if (Test-Path $shots) {
-    Copy-Item "$shots\*.png" $OutputDir -Force
-    Write-Host "Reference screenshots saved to: $OutputDir"
-    Get-ChildItem $OutputDir | ForEach-Object { Write-Host "  $($_.Name)" }
+# Move screenshots
+$found = Get-ChildItem "$shotsDir\*.png" -ErrorAction SilentlyContinue
+Write-Host "Found $($found.Count) screenshots in $shotsDir"
+if ($found.Count -gt 0) {
+    Copy-Item "$shotsDir\*.png" $OutputDir -Force
+    Get-ChildItem $OutputDir | Select-Object Name | Format-Table
 } else {
-    Write-Warning "No screenshots found at $shots"
+    Write-Warning "No screenshots captured. F12 may not be reaching Snes9x."
+    Write-Host "Run snes9x manually and press F12 during each test screen to populate tests/snes9x_ref/"
 }
