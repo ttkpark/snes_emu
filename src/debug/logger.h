@@ -5,7 +5,9 @@
 #include <deque>
 
 // Define to enable logging (comment out to disable for performance)
-#define ENABLE_LOGGING  // Enabled - CPU trace disabled separately
+// Disabled for PPU iteration performance — emulator runs ~10× faster without per-instruction traces.
+// Re-enable when debugging SPC700/CPU opcode bugs that need apu_trace.log / cpu_trace.log.
+// #define ENABLE_LOGGING
 
 class Logger {
 public:

@@ -729,14 +729,24 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Run one full frame: 262 scanlines × 341 dots
-        // PPU runs every 4 master cycles, CPU every 6, APU every 2
-        // LCM(4,6,2) = 12 master cycles per batch = 3 PPU, 2 CPU, 6 APU steps
-        // 89342 / 12 = 7445 batches (with 2 master cycles remainder)
+        // Run one full frame: 262 scanlines × 341 dots (= 89342 master cycles)
+        // Real SNES clocks (relative to 21.477 MHz master):
+        //   PPU: 1 step every  4 master cycles (5.37 MHz dot clock)
+        //   CPU: 1 cycle every 6 master cycles slow-ROM (3.58 MHz avg)
+        //   APU: 1 SPC700 cycle every ~21 master cycles (1.024 MHz)
+        // NOTE: Our apu.step() executes ONE SPC700 instruction per call (not one cycle).
+        //   Average SPC700 instruction = ~4 SPC cycles ≈ 84 master cycles.
+        //   CPU:APU master-clock ratio = 6:24 = 4:1 (CPU triggers 4× more often than APU).
+        //   Previous code ran apu.step() 3× per 6-MC tick (1 instr per 2 MC) which was
+        //   ~40× too fast AND consumed so much CPU time that the host loop dropped to
+        //   ~0.35 fps, making IPL transfer take hours. With ~4 ticks/APU instr the APU
+        //   still runs slightly faster than real SPC (since 1 step = 1 instr not 1 cycle),
+        //   but stays well ahead of CPU STA/CMP handshake loops without choking the host.
         static int lastScanline = -1;
         static int cpuCyclePending = 0;  // extra ticks to stall CPU (slow-ROM timing)
+        static int apuTickAccum = 0;     // master-clock accumulator for 4:1 CPU:APU ratio
 
-        // 6 master cycles per tick: 1.5 PPU, 1 CPU, 3 APU
+        // 6 master cycles per tick: 1.5 PPU, 1 CPU step-trigger, 1 APU step every ~4 ticks
         // Use 14890 ticks (= 89340 master cycles, close to 89342)
         for (int tick = 0; tick < 14890 && running; tick++) {
             // PPU: 1 step every 4 master cycles → 1.5 per 6mc tick
@@ -785,10 +795,15 @@ int main(int argc, char* argv[]) {
             }
             cycleCount++;
 
-            // APU: 3 steps per 6 master cycles (every 2mc)
-            apu.step();
-            apu.step();
-            apu.step();
+            // APU: target CPU:APU = 4:1 master-clock ratio.
+            // One tick = 6 MC. Trigger apu.step() every 4 ticks (24 MC) so the APU
+            // runs at 1 SPC instruction per 24 MC. Using a master-clock accumulator
+            // keeps the cadence even if the tick budget ever drifts from 4-aligned.
+            apuTickAccum += 6; // MC advanced this tick
+            while (apuTickAccum >= 24) {
+                apu.step();
+                apuTickAccum -= 24;
+            }
         } // end frame loop
 
         // Render frame if ready
@@ -811,6 +826,61 @@ int main(int argc, char* argv[]) {
                 fwrite(ppu.getFramebuffer(), 4,
                        PPU::SCREEN_WIDTH * PPU::SCREEN_HEIGHT, stdout);
                 fflush(stdout);
+            }
+
+            // Save BMP snapshot at specific frames for visual diff against Snes9x reference
+            if (frameCount == 30 || frameCount == 60 || frameCount == 90 ||
+                frameCount == 120 || frameCount == 180 || frameCount == 300 ||
+                frameCount == 450 || frameCount == 600 || frameCount == 670 ||
+                frameCount == 700 || frameCount == 750 || frameCount == 800 ||
+                frameCount == 900 || frameCount == 1000 ||
+                frameCount == 1200 || frameCount == 1400 || frameCount == 1600 ||
+                frameCount == 1800 || frameCount == 2000) {
+                const uint32_t W = PPU::SCREEN_WIDTH, H = PPU::SCREEN_HEIGHT;
+                uint32_t rowBytes = ((W * 3 + 3) & ~3u);
+                uint32_t dataSz  = rowBytes * H;
+                uint32_t fileSz  = 14 + 40 + dataSz;
+                char fname[64];
+                snprintf(fname, sizeof(fname), "frame_f%04llu.bmp", (unsigned long long)frameCount);
+                FILE* bf = fopen(fname, "wb");
+                if (bf) {
+                    uint8_t hdr[54] = {0};
+                    hdr[0]='B'; hdr[1]='M';
+                    hdr[2]= fileSz      & 0xFF;
+                    hdr[3]=(fileSz>>8)  & 0xFF;
+                    hdr[4]=(fileSz>>16) & 0xFF;
+                    hdr[5]=(fileSz>>24) & 0xFF;
+                    hdr[10]=54;
+                    hdr[14]=40;
+                    hdr[18]= W     & 0xFF; hdr[19]=(W>>8)&0xFF; hdr[20]=(W>>16)&0xFF; hdr[21]=(W>>24)&0xFF;
+                    int32_t negH = -(int32_t)H;
+                    hdr[22]= negH      & 0xFF;
+                    hdr[23]=(negH>>8)  & 0xFF;
+                    hdr[24]=(negH>>16) & 0xFF;
+                    hdr[25]=(negH>>24) & 0xFF;
+                    hdr[26]=1; hdr[28]=24;
+                    hdr[34]= dataSz     & 0xFF;
+                    hdr[35]=(dataSz>>8) & 0xFF;
+                    hdr[36]=(dataSz>>16)& 0xFF;
+                    hdr[37]=(dataSz>>24)& 0xFF;
+                    fwrite(hdr, 1, 54, bf);
+                    const uint32_t* fb = ppu.getFramebuffer();
+                    std::vector<uint8_t> row(rowBytes, 0);
+                    for (uint32_t y = 0; y < H; y++) {
+                        for (uint32_t x = 0; x < W; x++) {
+                            uint32_t px = fb[y*W + x];
+                            uint8_t r = px & 0xFF;
+                            uint8_t g = (px >> 8) & 0xFF;
+                            uint8_t b = (px >> 16) & 0xFF;
+                            row[x*3+0] = b;
+                            row[x*3+1] = g;
+                            row[x*3+2] = r;
+                        }
+                        fwrite(row.data(), 1, rowBytes, bf);
+                    }
+                    fclose(bf);
+                    fprintf(stderr, "[BMP] Saved %s\n", fname);
+                }
             }
 
             // Max-frames limit (headless testing)

@@ -223,15 +223,35 @@ void APU::step() {
 
 uint8_t APU::readPort(uint8_t port) {
     if (port >= 4) return 0x00;
-    // CPU reads what SPC700 wrote to $F4-$F7 (stored in m_aram[0xF4+port])
-    return m_aram[0xF4 + port];
+    uint8_t val = m_aram[0xF4 + port];
+    // Track SPC test result: port0=0x01 means pass, 0x02 means fail
+    if (port == 0 && m_regs.pc < 0xFFC0) {
+        static bool reported = false;
+        if (!reported && (val == 0x01 || val == 0x02)) {
+            fprintf(stderr, "[SPC] Test result: port0=0x%02X (%s), SPC PC=0x%04X\n",
+                    val, val == 0x01 ? "PASS" : "FAIL", m_regs.pc);
+            reported = (val == 0x02); // keep reporting passes
+        }
+    }
+    return val;
 }
 
 void APU::writePort(uint8_t port, uint8_t value) {
     if (port >= 4) return;
+    uint8_t oldVal = m_cpuPorts[port];
     m_cpuPorts[port] = value;
     // The IPL ROM handles data transfer natively.
     // CPU writes go to m_cpuPorts[], SPC reads them via readARAM($F4-$F7).
+    // port_comm.log: record CPU->SPC direction
+    {
+        std::ostringstream poss;
+        poss << "[CPU->SPC] port" << (int)port
+             << " = 0x" << std::hex << std::setw(2) << std::setfill('0') << (int)value
+             << " (was 0x" << std::setw(2) << std::setfill('0') << (int)oldVal
+             << ") SPC_PC=0x" << std::setw(4) << std::setfill('0') << m_regs.pc
+             << std::dec;
+        Logger::getInstance().logPort(poss.str());
+    }
 }
 
 // OLD writePort code removed (was 600+ lines of software state machine).
@@ -910,8 +930,11 @@ void APU::executeSPC700Instruction() {
     uint16_t savedPC = m_regs.pc;
     uint8_t opcode = readARAM(m_regs.pc++);  // Fetch opcode and advance PC past it
 
+    // Only build log strings when logging is enabled
+    bool loggingEnabled = Logger::getInstance().isLoggingEnabled();
+
     // Debug: dump ARAM on each entry to 0x0300 (block starts)
-    if (savedPC == 0x0300) {
+    if (loggingEnabled && savedPC == 0x0300) {
         static int entryCount = 0;
         entryCount++;
         fprintf(stderr, "\n=== BLOCK %d: PC=0x0300, opcode=0x%02X ===\n", entryCount, opcode);
@@ -922,22 +945,8 @@ void APU::executeSPC700Instruction() {
         fprintf(stderr, "\nIPL=%d, $00=%02X $01=%02X\n", m_iplromEnable?1:0, m_aram[0], m_aram[1]);
     }
 
-    uint8_t savedA = m_regs.a;
-    uint8_t savedX = m_regs.x;
-    uint8_t savedY = m_regs.y;
-    uint8_t savedSP = m_regs.sp;
-    uint8_t savedPSW = m_regs.psw;
-
-    // Get operand length and read operands for logging
-    // PC is now past the opcode byte, pointing to first operand
-    int operandLength = getSPC700OperandLength(opcode);
-    std::vector<uint8_t> operands;
-    for (int i = 0; i < operandLength; i++) {
-        operands.push_back(readARAM(m_regs.pc + i));  // Read operands from current PC
-    }
-    
     // Debug: Dump SPC memory at 0x0300 when first executing
-    if (m_spcLoadState == SPC_LOAD_COMPLETE && savedPC == 0x0300) {
+    if (loggingEnabled && m_spcLoadState == SPC_LOAD_COMPLETE && savedPC == 0x0300) {
         static bool once = true;
         if (once) {
             once = false;
@@ -951,8 +960,30 @@ void APU::executeSPC700Instruction() {
             std::cout << "APU: Starting SPC program execution at PC=0x0300" << std::endl;
         }
     }
-    
-    // Get opcode name (simplified - just show opcode hex for now)
+    if (loggingEnabled) {
+    // Save registers for logging
+    uint8_t savedA = m_regs.a;
+    uint8_t savedX = m_regs.x;
+    uint8_t savedY = m_regs.y;
+    uint8_t savedSP = m_regs.sp;
+    uint8_t savedPSW = m_regs.psw;
+
+    // Get operand length and read operands for logging
+    // IMPORTANT: bypass I/O side effects ($00F0-$00FF timer counter reads reset the counter)
+    // by peeking raw ARAM for operand bytes. This is a logging-only prefetch; the real
+    // opcode body re-reads the operands via readARAM below.
+    int operandLength = getSPC700OperandLength(opcode);
+    uint8_t operands[3];
+    for (int i = 0; i < operandLength; i++) {
+        uint16_t pa = (m_regs.pc + i) & 0xFFFF;
+        if (pa >= IPL_ROM_BASE && m_iplromEnable) {
+            operands[i] = m_iplROM[pa & 0x3F];
+        } else {
+            operands[i] = m_aram[pa];
+        }
+    }
+
+    // Get opcode name
     std::string opcodeName = "UNKNOWN";
     switch (opcode) {
         case 0x00: opcodeName = "NOP"; break;
@@ -1215,48 +1246,44 @@ void APU::executeSPC700Instruction() {
         static int logCount = 0;
         if (logCount < 10) {
             std::cout << "[SPC] PC=0x" << std::hex << savedPC << " | " << std::setw(2) << (int)opcode;
-            for (size_t i = 0; i < operands.size(); i++) {
+            for (int i = 0; i < operandLength; i++) {
                 std::cout << " " << std::setw(2) << (int)operands[i];
             }
             std::cout << " | " << opcodeName << std::dec << std::endl;
             logCount++;
         }
     }
-    
-    // Log SPC700 execution - always log after SPC_LOAD_COMPLETE to debug test failures
+
+    // Log SPC700 execution
     static int spcLogCount = 0;
     bool shouldLog = false;
     if (m_spcLoadState == SPC_LOAD_COMPLETE) {
-        // Log first 200 instructions after load, then log every 1000th instruction
         if (spcLogCount < 200 || (spcLogCount % 1000 == 0)) {
             shouldLog = true;
         }
         spcLogCount++;
-    } else if (Logger::getInstance().isLoggingEnabled()) {
+    } else {
         shouldLog = true;
     }
     if(opcode == 0x00 && m_regs.pc < 0x0100)
         shouldLog = false;
-    
+
     if (shouldLog) {
         std::ostringstream oss;
         oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0') << (m_cpu ? m_cpu->getCycles() : 0) << "] "
             << "SPC700 PC:0x" << std::hex << std::setw(4) << std::setfill('0') << savedPC << " | ";
-        
-        // Output machine code bytes
+
         oss << std::setw(2) << std::setfill('0') << (int)opcode;
-        for (size_t i = 0; i < operands.size(); i++) {
+        for (int i = 0; i < operandLength; i++) {
             oss << " " << std::setw(2) << std::setfill('0') << (int)operands[i];
         }
-        // Pad to fixed width for alignment
         int totalBytes = 1 + operandLength;
         for (int i = totalBytes; i < 4; i++) {
             oss << "   ";
         }
-        
+
         oss << " | " << std::left << std::setw(20) << std::setfill(' ') << opcodeName << std::right;
-        
-        // Output operand values if present
+
         if (operandLength > 0) {
             oss << " | ";
             if (operandLength == 1) {
@@ -1265,24 +1292,22 @@ void APU::executeSPC700Instruction() {
                 uint16_t val = operands[0] | (operands[1] << 8);
                 oss << "operand=0x" << std::setw(4) << std::setfill('0') << val;
             } else {
-                for (size_t j = 0; j < operands.size(); j++) {
+                for (int j = 0; j < operandLength; j++) {
                     if (j > 0) oss << ",";
                     oss << "0x" << std::setw(2) << std::setfill('0') << (int)operands[j];
                 }
             }
         }
-        
+
         oss << " | A:0x" << std::setw(2) << std::setfill('0') << (int)savedA
             << " | X:0x" << std::setw(2) << std::setfill('0') << (int)savedX
             << " | Y:0x" << std::setw(2) << std::setfill('0') << (int)savedY
             << " | SP:0x" << std::setw(2) << std::setfill('0') << (int)savedSP
             << " | PSW:0x" << std::setw(2) << std::setfill('0') << (int)savedPSW;
-        //std::cout << oss.str() << std::endl;
-        if (Logger::getInstance().isLoggingEnabled()) {
-            Logger::getInstance().logAPU(oss.str());
-        }
+        Logger::getInstance().logAPU(oss.str());
     }
-    
+    } // end if (loggingEnabled)
+
     // SPC700 instruction execution
     switch (opcode) {
         case 0x00: // NOP
@@ -3810,10 +3835,35 @@ void APU::writeARAM(uint16_t addr, uint8_t value) {
                 handleDSPRegisterWrite(dspAddr, value, oldValue);
                 break;
             }
-            case 0xF4: case 0xF5: case 0xF6: case 0xF7:
+            case 0xF4: case 0xF5: case 0xF6: case 0xF7: {
                 // SPC700 output ports - stored in ARAM so CPU can read via readPort()
+                // Track test progress: port 2 ($F6) = test number, port 0 ($F4) = status
+                if (addr == 0xF6 && value != m_aram[addr]) {
+                    fprintf(stderr, "[SPC] Test 0x%02X\n", value);
+                }
+                if (addr == 0xF4 && value != m_aram[0xF4]) {
+                    static int port0LogCount = 0;
+                    if (port0LogCount < 30) {
+                        fprintf(stderr, "[SPC] port0: 0x%02X -> 0x%02X (PC=0x%04X)\n",
+                                m_aram[0xF4], value, m_regs.pc);
+                        port0LogCount++;
+                    }
+                }
+                // port_comm.log: record SPC->CPU direction (SPC writes to $F4-$F7)
+                {
+                    uint8_t port = addr - 0xF4;
+                    uint8_t oldVal = m_aram[addr];
+                    std::ostringstream poss;
+                    poss << "[SPC->CPU] port" << (int)port
+                         << " = 0x" << std::hex << std::setw(2) << std::setfill('0') << (int)value
+                         << " (was 0x" << std::setw(2) << std::setfill('0') << (int)oldVal
+                         << ") SPC_PC=0x" << std::setw(4) << std::setfill('0') << m_regs.pc
+                         << std::dec;
+                    Logger::getInstance().logPort(poss.str());
+                }
                 m_aram[addr] = value;
                 break;
+            }
             case 0xFA: case 0xFB: case 0xFC:
                 m_timers[addr - 0xFA].target = value;
                 break;

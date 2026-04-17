@@ -752,28 +752,16 @@ void CPU::step() {
     uint16_t pcBeforeExec = m_pc - 1;  // PC was incremented by m_address_plus_1, so subtract 1
     bool wasInWaitLoop = (pcBeforeExec >= 0x008193 && pcBeforeExec <= 0x008196);
 
-    // Trace: capture last 20 PCs before entry to F78D
-    {
-        static uint32_t recentPCs[20];
-        static uint8_t recentOps[20];
-        static uint8_t recentP[20];
-        static int recentIdx = 0;
-        recentPCs[recentIdx] = (m_pbr << 16) | pcBeforeExec;
-        recentOps[recentIdx] = opcode;
-        recentP[recentIdx] = m_p;
-        recentIdx = (recentIdx + 1) % 20;
-
-        int fc_trace = m_ppu ? m_ppu->getFrameCount() : -1;
-        if (m_pbr == 0x00 && pcBeforeExec == 0xF78D && fc_trace == 191) {
-            static bool dumped = false;
-            if (!dumped) {
-                dumped = true;
-                fprintf(stderr, "[ENTRY_F78D] Last 20 instructions before F78D:\n");
-                for (int i = 0; i < 20; i++) {
-                    int idx = (recentIdx + i) % 20;
-                    fprintf(stderr, "  %06X op=%02X P=%02X\n", recentPCs[idx], recentOps[idx], recentP[idx]);
-                }
-            }
+    // Trace: log when CPU enters $7E:8000 (cputest opcode execution)
+    if (m_pbr == 0x7E && pcBeforeExec == 0x8000) {
+        static int testExecCount = 0;
+        if (testExecCount < 2000) {
+            uint8_t b0 = m_memory->read8(0x7E8000);
+            uint8_t b1 = m_memory->read8(0x7E8001);
+            uint8_t b2 = m_memory->read8(0x7E8002);
+            fprintf(stderr, "[TEXEC] #%d op=%02X(%02X %02X) A=%04X X=%04X Y=%04X P=%02X SP=%04X\n",
+                testExecCount, b0, b1, b2, m_a, m_x, m_y, m_p, m_sp);
+            testExecCount++;
         }
     }
 
@@ -3851,18 +3839,15 @@ void CPU::executeInstruction(uint8_t opcode) {
         } break;
         
         case 0x60: { // RTS - Return from Subroutine
-            uint16_t addr = pullStack16();
-            // Debug: Log RTS execution
-            static int rtsCount = 0;
-            if (rtsCount < 10) {
-                std::cout << "CPU: RTS at PC=0x" << std::hex << m_address 
-                          << " pulled addr=0x" << addr 
-                          << " new PC=0x" << addr + 1 
-                          << " new SP=0x" << m_sp << std::dec << std::endl;
-                rtsCount++;
+            // Log when executing from WRAM (cputest)
+            if (m_pbr == 0x7E) {
+                uint8_t sLo = m_memory->read8(m_sp + 1);
+                uint8_t sHi = m_memory->read8(m_sp + 2);
+                fprintf(stderr, "[RTS_7E] at %02X:%04X SP=%04X stack=[%02X %02X] -> ret=%04X PBR=%02X\n",
+                    m_pbr, m_pc, m_sp, sLo, sHi, (uint16_t)((sHi<<8|sLo)+1), m_pbr);
             }
-            m_pc = addr + 1;  // RTS returns to address + 1
-            stackTrace();
+            uint16_t addr = pullStack16();
+            m_pc = addr + 1;
         } break;
         
         // Flag Instructions

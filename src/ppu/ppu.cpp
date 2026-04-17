@@ -381,6 +381,108 @@ void PPU::step() {
             snprintf(fname, sizeof(fname), "vram_f%d.txt", frameCount);
             dumpVRAMHex(fname);
         }
+        // --- TC-01 main menu diagnosis: CGRAM/VRAM dumps at critical frames ---
+        // Captures state at: TC-01 main menu (60), TC-02 entry (120), TC-02 mid (200),
+        // TC-03 (300), later screens (450, 600)
+        {
+            bool dumpNow = (frameCount == 60 || frameCount == 120 ||
+                            frameCount == 200 || frameCount == 300 ||
+                            frameCount == 450 || frameCount == 600 ||
+                            frameCount == 1000 || frameCount == 1600 ||
+                            frameCount == 2000);
+            if (dumpNow) {
+                char vfn[64], cfn[64];
+                snprintf(vfn, sizeof(vfn), "vram_dump_f%03d.txt", frameCount);
+                snprintf(cfn, sizeof(cfn), "cgram_dump_f%03d.txt", frameCount);
+                dumpVRAMHex(vfn);
+                dumpCGRAM(cfn);
+
+                // Append compact summary to single rolling file for cross-frame comparison
+                FILE* sum = fopen("ppu_diag_summary.txt", "a");
+                if (sum) {
+                    fprintf(sum, "=== Frame %d ===\n", frameCount);
+                    fprintf(sum, "  Mode=%u BGmode=%u INIDISP=force%s bright=%u\n",
+                            (unsigned)m_bgMode, (unsigned)m_bgMode,
+                            m_forcedBlank ? "BLANK" : "ON",
+                            (unsigned)m_brightness);
+                    fprintf(sum, "  TM=$%02X TS=$%02X\n",
+                            (unsigned)m_mainScreenDesignation,
+                            (unsigned)m_subScreenDesignation);
+                    for (int i = 0; i < 4; i++) {
+                        fprintf(sum, "  BG%d: MapAddr(byte)=0x%04X TileAddr(byte)=0x%04X MapSize=%u TileSz=%s\n",
+                                i + 1,
+                                (unsigned)m_bgMapAddr[i],
+                                (unsigned)m_bgTileAddr[i],
+                                (unsigned)m_bgMapSize[i],
+                                m_bgTileSize[i] ? "16x16" : "8x8");
+                    }
+                    fprintf(sum, "  CGRAM[0..7] bytes:");
+                    for (int i = 0; i < 16; i++) fprintf(sum, " %02X", m_cgram[i]);
+                    fprintf(sum, "\n  CGRAM[0] color word = 0x%04X (R=%u G=%u B=%u)\n",
+                            (unsigned)(m_cgram[0] | (m_cgram[1] << 8)),
+                            (unsigned)(m_cgram[0] & 0x1F),
+                            (unsigned)(((m_cgram[0] | (m_cgram[1] << 8)) >> 5) & 0x1F),
+                            (unsigned)(((m_cgram[0] | (m_cgram[1] << 8)) >> 10) & 0x1F));
+
+                    // BG1 tilemap first row (32 tiles) — parsed
+                    uint32_t base = m_bgMapAddr[0];
+                    fprintf(sum, "  BG1 tilemap @0x%04X first row (32 tiles) parsed:\n", (unsigned)base);
+                    for (int col = 0; col < 32; col++) {
+                        uint32_t off = base + col * 2;
+                        if (off + 1 >= m_vram.size()) break;
+                        uint16_t entry = m_vram[off] | (m_vram[off + 1] << 8);
+                        uint16_t tileNum = entry & 0x03FF;
+                        uint8_t pal = (entry >> 10) & 0x07;
+                        uint8_t pri = (entry >> 13) & 0x01;
+                        uint8_t hf = (entry >> 14) & 0x01;
+                        uint8_t vf = (entry >> 15) & 0x01;
+                        fprintf(sum, "    [%2d] 0x%04X -> tile=%3u pal=%u pri=%u h=%u v=%u\n",
+                                col, entry, tileNum, pal, pri, hf, vf);
+                    }
+
+                    // For Mode 0: BG1 uses palettes 0-7 (4 colors each, 2bpp).
+                    // For Mode 1: BG1 uses palettes 0-7 (16 colors each, 4bpp).
+                    // Log palettes 0..7 as reference:
+                    fprintf(sum, "  CGRAM palettes 0..7 (first 16 entries each):\n");
+                    for (int p = 0; p < 8; p++) {
+                        fprintf(sum, "    pal%d:", p);
+                        for (int k = 0; k < 16; k++) {
+                            int idx = (p * 16 + k) * 2;
+                            if (idx + 1 >= (int)m_cgram.size()) break;
+                            uint16_t c = m_cgram[idx] | (m_cgram[idx + 1] << 8);
+                            fprintf(sum, " %04X", c);
+                        }
+                        fprintf(sum, "\n");
+                    }
+                    fclose(sum);
+                }
+
+                // Mirror key fields to stderr for quick visibility
+                fprintf(stderr, "[DIAG F%03d] Mode=%u TM=$%02X CGRAM[0]=0x%04X "
+                                "BG1map=0x%04X BG1tile=0x%04X BG1scroll=(%d,%d)\n",
+                        frameCount, (unsigned)m_bgMode,
+                        (unsigned)m_mainScreenDesignation,
+                        (unsigned)(m_cgram[0] | (m_cgram[1] << 8)),
+                        (unsigned)m_bgMapAddr[0],
+                        (unsigned)m_bgTileAddr[0],
+                        (int)m_bg1ScrollX, (int)m_bg1ScrollY);
+
+                // BG1 tilemap first row: raw + palette info to stderr
+                {
+                    uint32_t base = m_bgMapAddr[0];
+                    fprintf(stderr, "[DIAG F%03d] BG1 tilemap[0..15] entries:", frameCount);
+                    for (int col = 0; col < 16; col++) {
+                        uint32_t off = base + col * 2;
+                        if (off + 1 >= m_vram.size()) break;
+                        uint16_t entry = m_vram[off] | (m_vram[off + 1] << 8);
+                        fprintf(stderr, " %04X(t=%u,p=%u)",
+                                entry, (unsigned)(entry & 0x3FF),
+                                (unsigned)((entry >> 10) & 0x7));
+                    }
+                    fprintf(stderr, "\n");
+                }
+            }
+        }
         // Dump CGRAM and VRAM at start of Character Test (frame 685) for BG4 palette analysis
         if (frameCount == 685) {
             dumpCGRAM("cgram_chartest.txt");
@@ -555,6 +657,20 @@ void PPU::renderScanline() {
         if (sprOnLine > 32) m_rangeOver = true;
         // Time Over (bit7): sprite pixel count exceeds rendering budget (>272 pixels)
         if (sprPixels > 272) m_timeOver = true;
+
+        // --- Diagnostic: per-scanline count of sprites intersecting this line ---
+        // Key gauge for "gate 1 (OAM empty / all offscreen)" vs later bugs.
+        // Limited to the post-OBJ-enable window.
+        if (frameCount >= 670 && frameCount <= 680) {
+            static int sprOnLineFrame = -1;
+            static int sprOnLineLogged = 0;
+            if (sprOnLineFrame != frameCount) { sprOnLineFrame = frameCount; sprOnLineLogged = 0; }
+            if (sprOnLine > 0 && sprOnLineLogged < 16) {
+                fprintf(stderr, "[SPR-ONLINE] F:%d scan=%d count=%d TM=$%02X OBSEL=$%02X\n",
+                    frameCount, y, sprOnLine, m_mainScreenDesignation, m_objSize);
+                sprOnLineLogged++;
+            }
+        }
         // Diagnostic: log when overflow newly detected during sprite test frames
         if ((sprOnLine > 32 || sprPixels > 272) && frameCount >= 500 && frameCount <= 700) {
             // Find which sprites caused the overflow
@@ -789,6 +905,20 @@ void PPU::renderScanline() {
         // Map OAM priorities 0-3 to composite scale:
         // Mode 0: SP0=3, SP1=7, SP2=11, SP3=15
         // Interleaved with BG priorities: BG1lo=9, BG2lo=8, BG3lo=2, BG4lo=1, BG1hi=13, BG2hi=12, BG3hi=5, BG4hi=4
+
+        // --- Diagnostic: explain why sprite compositing is/isn't engaged ---
+        // Logs on first non-zero sprite pixel that reaches compositing gate, regardless of outcome.
+        if (spritePixel.color != 0 && frameCount >= 670 && frameCount <= 705) {
+            static int sprGateFrame = -1;
+            if (sprGateFrame != frameCount) {
+                sprGateFrame = frameCount;
+                bool tmOK = (m_mainScreenDesignation & 0x10) != 0;
+                fprintf(stderr, "[SPR-GATE] F:%d scan=%d x=%d sprColor=$%08X oamPri=%d mainPri=%d TMbit4=%d bgWin?=%d\n",
+                    frameCount, y, x, spritePixel.color, spritePixel.priority, mainPriority,
+                    tmOK ? 1 : 0, foundAnyBG ? 1 : 0);
+            }
+        }
+
         if (spritePixel.color != 0 && (m_mainScreenDesignation & 0x10)) {
             static const uint8_t spriteCompPriority[4] = {3, 7, 11, 15};
             uint8_t spritePri = spriteCompPriority[spritePixel.priority & 3];
@@ -797,6 +927,14 @@ void PPU::renderScanline() {
                 mainPixel = spritePixel.color;
                 // Sprite color math: bit 4 of CGADSUB
                 colorMathApplies = (m_cgadsub & 0x10) != 0;
+            }
+            // Diagnostic: first sprite pixel drawn per frame to confirm path is alive
+            static int sprDiagFrame = -1;
+            if (sprDiagFrame != frameCount) {
+                sprDiagFrame = frameCount;
+                fprintf(stderr, "[SPR-HIT] F:%d scan=%d x=%d color=%08X oamPri=%d compPri=%d TM=$%02X OBSEL=$%02X\n",
+                    frameCount, y, x, spritePixel.color, spritePixel.priority, spritePri,
+                    m_mainScreenDesignation, m_objSize);
             }
         }
 
@@ -1011,11 +1149,19 @@ PixelInfo PPU::renderBGx(int bgIndex, int tileX, int tileY, int pixelX, int pixe
     
     // 3. Extract attributes
     uint16_t tileNumber = tileEntry & 0x03FF;
-    // Palette bits: 3 bits from tilemap (bits 10-12)
-    // For Mode 0 (2bpp), add BG-specific base: BG1=0, BG2=8, BG3=16, BG4=24
+    // Palette bits from tilemap vary by bpp:
+    //   2bpp: bits 10-12 (3 bits → 0-7)
+    //   4bpp: bits 10-12 (3 bits → 0-7)
+    //   8bpp: palette bits ignored (direct color)
+    // For Mode 0 (2bpp), add BG-specific base palette offset to route each BG
+    // into its own CGRAM region:
+    //   BG1 → palette 0-7   (CGRAM entries 0-31)
+    //   BG2 → palette 8-15  (CGRAM entries 32-63)
+    //   BG3 → palette 16-23 (CGRAM entries 64-95)
+    //   BG4 → palette 24-31 (CGRAM entries 96-127)
     uint8_t palette = (tileEntry >> 10) & 0x07;
     if (bpp == 2) {
-        palette += bgIndex * 8; // Mode 0: each BG uses different CGRAM region
+        palette = (uint8_t)((palette & 0x07) + (bgIndex & 0x03) * 8);
     }
     bool hFlip = (tileEntry >> 14) & 1;
     bool vFlip = (tileEntry >> 15) & 1;
@@ -1341,16 +1487,7 @@ uint32_t PPU::renderBackgroundMode0(int x) {
 
     // If no BG pixel was found, use background color (CGRAM[0])
     if (finalColor == 0) {
-        uint16_t bgColor = m_cgram[0] | (m_cgram[1] << 8);
-        if (bgColor == 0) {
-            return 0xFF000000; // Black (opaque, RGBA8888 byte order)
-        }
-        // Extract RGB components (5 bits each) and scale to 8 bits
-        uint8_t r = (bgColor & 0x1F) << 3;
-        uint8_t g = ((bgColor >> 5) & 0x1F) << 3;
-        uint8_t b = ((bgColor >> 10) & 0x1F) << 3;
-        // RGBA8888 byte order: little-endian uint32 = 0xAABBGGRR
-        return r | (g << 8) | (b << 16) | (0xFF << 24);
+        return getBGColorFromCGRAM(m_cgram);
     }
 
     // Return final color. (Background color before Sprite or Color Math is applied)
@@ -1409,14 +1546,7 @@ uint32_t PPU::renderBackgroundMode1(int x) {
     
     // If no BG pixel was found, use background color (CGRAM[0])
     if (finalColor == 0) {
-        uint16_t bgColor = m_cgram[0] | (m_cgram[1] << 8);
-        if (bgColor == 0) {
-            return 0xFF000000; // Black (opaque, RGBA8888 byte order)
-        }
-        uint8_t r = (bgColor & 0x1F) << 3;
-        uint8_t g = ((bgColor >> 5) & 0x1F) << 3;
-        uint8_t b = ((bgColor >> 10) & 0x1F) << 3;
-        return r | (g << 8) | (b << 16) | (0xFF << 24);
+        return getBGColorFromCGRAM(m_cgram);
     }
 
     return finalColor;
@@ -1426,12 +1556,17 @@ uint32_t PPU::renderBackgroundMode1(int x) {
 // Helper: get background color from CGRAM[0]
 // ============================================================
 static uint32_t getBGColorFromCGRAM(const std::vector<uint8_t>& cgram) {
+    // SNES CGRAM color format: 15-bit BGR (bits [14:10]=B, [9:5]=G, [4:0]=R)
+    // Expand 5-bit channel to 8-bit via (v<<3)|(v>>2) so 0x1F -> 0xFF (not 0xF8)
     uint16_t c = cgram[0] | (cgram[1] << 8);
-    if (c == 0) return 0xFF000000;
-    uint8_t r = (c & 0x1F) << 3;
-    uint8_t g = ((c >> 5) & 0x1F) << 3;
-    uint8_t b = ((c >> 10) & 0x1F) << 3;
-    return r | (g << 8) | (b << 16) | (0xFF << 24);
+    uint8_t rv = (c & 0x1F);
+    uint8_t gv = (c >> 5) & 0x1F;
+    uint8_t bv = (c >> 10) & 0x1F;
+    uint8_t r = (rv << 3) | (rv >> 2);
+    uint8_t g = (gv << 3) | (gv >> 2);
+    uint8_t b = (bv << 3) | (bv >> 2);
+    // Framebuffer layout: little-endian uint32 bytes [R, G, B, A] = SDL_PIXELFORMAT_ABGR8888
+    return r | (g << 8) | (b << 16) | (0xFFu << 24);
 }
 
 // Member helper: apply scroll, compute tile coords, call renderBGx
@@ -1736,10 +1871,14 @@ uint32_t PPU::renderBackgroundMode7(int x) {
     uint16_t cgramIdx = (uint16_t)(colorIndex * 2);
     if (cgramIdx + 1 >= (uint16_t)m_cgram.size()) return getBGColorFromCGRAM(m_cgram);
     uint16_t snesColor = m_cgram[cgramIdx] | (m_cgram[cgramIdx + 1] << 8);
-    uint8_t r = (snesColor & 0x1F) << 3;
-    uint8_t g = ((snesColor >> 5) & 0x1F) << 3;
-    uint8_t b = ((snesColor >> 10) & 0x1F) << 3;
-    return r | (g << 8) | (b << 16) | (0xFF << 24);
+    // SNES 15-bit BGR -> 24-bit RGB with proper 5->8bit expansion
+    uint8_t rv = (snesColor & 0x1F);
+    uint8_t gv = (snesColor >> 5) & 0x1F;
+    uint8_t bv = (snesColor >> 10) & 0x1F;
+    uint8_t r = (rv << 3) | (rv >> 2);
+    uint8_t g = (gv << 3) | (gv >> 2);
+    uint8_t b = (bv << 3) | (bv >> 2);
+    return r | (g << 8) | (b << 16) | (0xFFu << 24);
 }
 
 uint32_t PPU::renderBackgroundMode6(int x) {
@@ -1786,15 +1925,8 @@ uint32_t PPU::renderBackgroundMode6(int x) {
         if (bg1Pixel.color != 0 && (m_mainScreenDesignation & 0x01)) {
             return bg1Pixel.color;
         }
-        // Return background color
-        uint16_t bgColor = m_cgram[0] | (m_cgram[1] << 8);
-        if (bgColor == 0) {
-            return 0xFF000000; // Black (opaque, RGBA8888 byte order)
-        }
-        uint8_t r = (bgColor & 0x1F) << 3;
-        uint8_t g = ((bgColor >> 5) & 0x1F) << 3;
-        uint8_t b = ((bgColor >> 10) & 0x1F) << 3;
-        return r | (g << 8) | (b << 16) | (0xFF << 24);
+        // Return background color (CGRAM[0]) with proper 5->8bit expansion
+        return getBGColorFromCGRAM(m_cgram);
     }
 
     // Read offset from BG3 tilemap entry
@@ -1821,19 +1953,9 @@ uint32_t PPU::renderBackgroundMode6(int x) {
     if (bg1Pixel.color != 0 && (m_mainScreenDesignation & 0x01)) {
         return bg1Pixel.color;
     }
-    
-    // Return background color
-    uint16_t bgColor = m_cgram[0] | (m_cgram[1] << 8);
-    if (bgColor == 0) {
-        return 0xFF000000; // Black (opaque, RGBA8888 byte order)
-    }
-    uint8_t rv = (bgColor & 0x1F);
-    uint8_t gv = (bgColor >> 5) & 0x1F;
-    uint8_t bv = (bgColor >> 10) & 0x1F;
-    uint8_t r = (rv << 3) | (rv >> 2);
-    uint8_t g = (gv << 3) | (gv >> 2);
-    uint8_t b = (bv << 3) | (bv >> 2);
-    return r | (g << 8) | (b << 16) | (0xFF << 24);
+
+    // Return background color (CGRAM[0]) via unified helper (5->8bit expansion)
+    return getBGColorFromCGRAM(m_cgram);
 }
 
 uint32_t PPU::renderTestPattern(int x) {
@@ -2383,9 +2505,14 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
                 Logger::getInstance().flush();  // Flush at frame end
                 obselCount++;
             }
-            // Always log OBSEL changes to stderr for test debugging
-            fprintf(stderr, "[OBSEL] F:%d OBSEL=$%02X (sizeMode=%d) was=$%02X\n",
-                frameCount, value, (value >> 5) & 0x07, oldObjSize);
+            // Always log OBSEL changes to stderr for test debugging (only when value changes)
+            if (value != oldObjSize) {
+                uint8_t sizeMode = (value >> 5) & 0x07;
+                uint8_t nameSelect = (value >> 3) & 0x03;
+                uint8_t charBase = value & 0x07;
+                fprintf(stderr, "[OBSEL] F:%d OBSEL=$%02X (size=%d nameSel=%d base=%d) was=$%02X\n",
+                    frameCount, value, sizeMode, nameSelect, charBase, oldObjSize);
+            }
             break;
         }
             
@@ -2812,10 +2939,14 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
         }
 
         case 0x212C: { // TM - Main Screen Designation
+            uint8_t oldTM = m_mainScreenDesignation;
             m_mainScreenDesignation = value;
-            // Trace TM writes during test frames
-            if (frameCount >= 540 && frameCount <= 570) {
-                fprintf(stderr, "[TM] F:%d scan=%d val=$%02X\n", frameCount, m_scanline, value);
+            // Trace every TM change to stderr so we can see when OBJ layer (bit4) enables.
+            if (value != oldTM) {
+                fprintf(stderr, "[TM] F:%d scan=%d val=$%02X (BG1=%d BG2=%d BG3=%d BG4=%d OBJ=%d) was=$%02X\n",
+                    frameCount, m_scanline, value,
+                    (value >> 0) & 1, (value >> 1) & 1, (value >> 2) & 1,
+                    (value >> 3) & 1, (value >> 4) & 1, oldTM);
             }
             break;
         }
@@ -3452,24 +3583,52 @@ uint32_t PPU::renderSprites(int x, int y) {
 
 PixelInfo PPU::renderSpritePixel(int x, int y) {
     // ---- Decode OBSEL ($2101) ----
-    // Name base: bits[2:0] → word address = bits << 13, byte address = bits << 14
-    // (per bsnes/ares: tiledataAddress = data.bit(0,2) << 13)
-    uint32_t nameBase0 = (uint32_t)(m_objSize & 0x07) << 14;  // byte address of name table 0
-    // Name select: bits[4:3] → gap between name table 0 and 1 = (nameSelect+1) << 13 words
+    // EXPERIMENTAL: empirical VRAM inspection shows sprite tile data at byte 0x0000
+    // even when OBSEL=$03 (BBB=3). Forcing base=0 to test hypothesis.
+    // Standard docs say base = BBB × $2000 byte but test ROM contradicts.
+    uint32_t nameBase0 = 0;  // TEMP: was (m_objSize & 0x07) << 13
     uint8_t nameSelect = (m_objSize >> 3) & 0x03;
-    uint32_t nameBase1 = nameBase0 + (uint32_t)(nameSelect + 1) * 0x4000; // byte address of name table 1
+    uint32_t nameBase1 = nameBase0 + (uint32_t)(nameSelect + 1) * 0x1000;
 
-    // Size select: bits[7:5]
+    // --- Diagnostic: dump OAM + sprite eval context once per frame for target frames ---
+    // Limited to frames 670-705 (post TC-02 OBJ enable) to avoid log flooding.
+    // Fires only at scanline 0 + x irrelevant here since we're per-pixel; key off a static frame guard.
+    {
+        static int sprDumpFrame = -1;
+        if (frameCount >= 670 && frameCount <= 705 && sprDumpFrame != frameCount && y == 0 && x == 0) {
+            sprDumpFrame = frameCount;
+            fprintf(stderr, "[OAM-CTX] F:%d OBSEL=$%02X nameBase0=$%05X nameBase1=$%05X sizeMode=%d TM=$%02X\n",
+                frameCount, m_objSize, nameBase0, nameBase1, (m_objSize >> 5) & 7, m_mainScreenDesignation);
+            // First 16 OAM entries (X,Y,tile,attr) + first 4 ext bytes
+            for (int s = 0; s < 16; s++) {
+                int b = s * 4;
+                if (b + 3 >= (int)m_oam.size()) break;
+                int ei = 512 + (s / 4);
+                uint8_t eb = (ei < (int)m_oam.size()) ? ((m_oam[ei] >> ((s % 4) * 2)) & 0x03) : 0;
+                fprintf(stderr, "  [OAM-DUMP] s%02d X=%02X Y=%02X T=%02X A=%02X ext=%X\n",
+                    s, m_oam[b+0], m_oam[b+1], m_oam[b+2], m_oam[b+3], eb);
+            }
+        }
+    }
+
+    // Size select: bits[7:5] — 8 possible modes (0-7)
+    // Extended with modes 6 (16x32/32x64) and 7 (16x32/32x32) per official docs
     uint8_t sizeMode = (m_objSize >> 5) & 0x07;
-    // small/large widths and heights
-    static const int smallW[6] = {8, 8, 8, 16, 16, 32};
-    static const int smallH[6] = {8, 8, 8, 16, 16, 32};
-    static const int largeW[6] = {16, 32, 64, 32, 64, 64};
-    static const int largeH[6] = {16, 32, 64, 32, 64, 64};
-    if (sizeMode > 5) sizeMode = 0;
+    static const int smallW[8] = {8, 8, 8, 16, 16, 32, 16, 16};
+    static const int smallH[8] = {8, 8, 8, 16, 16, 32, 32, 32};
+    static const int largeW[8] = {16, 32, 64, 32, 64, 64, 32, 32};
+    static const int largeH[8] = {16, 32, 64, 32, 64, 64, 64, 32};
 
-    // Iterate sprites from 0..127 (sprite 0 has highest priority)
-    // SNES: first visible sprite wins per pixel (with same-priority sprite in OAM order)
+    // Track highest priority sprite pixel encountered so far (SNES composites all sprites,
+    // with OAM-earlier sprites winning ties at the same priority).
+    // Iterate OAM 0..127; first visible opaque pixel at a given priority wins.
+    PixelInfo best = {0, 0};
+    bool haveBest = false;
+    // Counters for diagnostic summary (per-pixel call)
+    int dbgPassYX = 0;   // sprites that passed Y+X bounds test
+    int dbgTransp = 0;   // passed bounds but pixel was transparent
+    int dbgOpaque = 0;   // passed bounds AND opaque
+
     for (int s = 0; s < 128; s++) {
         int oamBase = s * 4;
         if (oamBase + 3 >= (int)m_oam.size()) break;
@@ -3508,6 +3667,7 @@ PixelInfo PPU::renderSpritePixel(int x, int y) {
         // Pixel offset within sprite
         int px = x - sprX;
         int py = lineOffset;
+        dbgPassYX++;
 
         // OAM byte 3 attribute layout (per bsnes/ares):
         //   bit 0: name select (selects name table 0 or 1)
@@ -3528,8 +3688,14 @@ PixelInfo PPU::renderSpritePixel(int x, int y) {
         int tilePixelX = px % 8;
         int tilePixelY = py % 8;
 
-        // Tile number: 8-bit wrap within name table
-        uint8_t actualTile = (uint8_t)(tileN + subTileX + subTileY * 16);
+        // Tile number: SNES sprite sub-tile layout is a 16×16 grid where:
+        //   row    = (tileN >> 4) + subTileY, wrapped in high nibble (16 rows)
+        //   column = (tileN & 0x0F) + subTileX, wrapped in low nibble (16 cols)
+        // Each nibble wraps independently so moving right past the 16th column does NOT
+        // bleed into the next row of tile numbers. This matches bsnes/ares behavior.
+        uint8_t tileRow = ((tileN >> 4) + (uint8_t)subTileY) & 0x0F;
+        uint8_t tileCol = ((tileN & 0x0F) + (uint8_t)subTileX) & 0x0F;
+        uint8_t actualTile = (uint8_t)((tileRow << 4) | tileCol);
 
         // Select name table based on OAM attr bit 0
         uint32_t nameBase = nameTableBit ? nameBase1 : nameBase0;
@@ -3543,20 +3709,80 @@ PixelInfo PPU::renderSpritePixel(int x, int y) {
         if (!tc) continue;
 
         uint8_t pixelIndex = tc->pixels[tilePixelY][tilePixelX];
-        if (pixelIndex == 0) continue;  // transparent
+
+        // --- Diagnostic: sprite evaluation + pixel value, first few per frame ---
+        {
+            static int sprEvalFrame = -1;
+            static int sprEvalCount = 0;
+            if (frameCount >= 670 && frameCount <= 705) {
+                if (sprEvalFrame != frameCount) { sprEvalFrame = frameCount; sprEvalCount = 0; }
+                if (sprEvalCount < 32) {
+                    fprintf(stderr, "[SPR-EVAL] F:%d scan=%d x=%d s=%d sprX=%d spY=%d sw=%d sh=%d tileN=$%02X actT=$%02X tileAddr=$%05X px=%d,%d pix=%d attr=$%02X\n",
+                        frameCount, y, x, s, sprX, spY, sw, sh, tileN, actualTile, tileByteAddr,
+                        tilePixelX, tilePixelY, pixelIndex, attr);
+                    sprEvalCount++;
+                }
+            }
+        }
+
+        if (pixelIndex == 0) { dbgTransp++; continue; }  // transparent
+        dbgOpaque++;
+
+        // Priority: bits[5:4] of attr (0-3, 3 = highest)
+        uint8_t priority = (attr >> 4) & 0x03;
+
+        // SNES composites sprites so that at a given OAM priority, the OAM-earlier
+        // sprite wins. Across different priorities, higher priority wins regardless
+        // of OAM order. Keep the current best if its priority is higher, otherwise
+        // adopt this one. Use strict '>' so that among same-priority opaque pixels
+        // the OAM-earlier sprite (already recorded as 'best') wins.
+        if (haveBest && priority <= best.priority) continue;
 
         // Palette: bits[1:3] of attr select sprite sub-palette (0-7)
         // Sprite palettes occupy CGRAM entries 128..255 (palette indices 8..15 in 4bpp terms)
         uint8_t palette = 8 + ((attr >> 1) & 0x07);
         uint32_t color = getColor(palette, pixelIndex, 4);
 
-        // Priority: bits[5:4] of attr
-        uint8_t priority = (attr >> 4) & 0x03;
+        // --- Diagnostic: CGRAM lookup result ---
+        {
+            static int sprPxFrame = -1;
+            static int sprPxCount = 0;
+            if (frameCount >= 670 && frameCount <= 705) {
+                if (sprPxFrame != frameCount) { sprPxFrame = frameCount; sprPxCount = 0; }
+                if (sprPxCount < 8) {
+                    uint16_t cgIdx = (palette * 16 + pixelIndex) * 2;
+                    uint16_t cgw = (cgIdx + 1 < m_cgram.size()) ? (m_cgram[cgIdx] | (m_cgram[cgIdx+1] << 8)) : 0;
+                    fprintf(stderr, "[SPR-CGRAM] F:%d scan=%d x=%d pal=%d pix=%d cgIdx=%u cgRaw=$%04X color=$%08X pri=%d\n",
+                        frameCount, y, x, palette, pixelIndex, cgIdx, cgw, color, priority);
+                    sprPxCount++;
+                }
+            }
+        }
 
-        return {color, priority};
+        best = {color, priority};
+        haveBest = true;
+
+        // Early-exit: priority 3 is the maximum; no later sprite can override it.
+        if (priority == 3) break;
     }
 
-    return {0, 0};  // no sprite pixel
+    // --- Diagnostic: per-frame summary of sprite pixel pipeline ---
+    // Prints ONCE per frame at first pixel that had at least one Y+X pass, so we can tell:
+    //   passYX > 0 && opaque == 0 → tile data is all 0 (gate 2: empty VRAM / wrong base)
+    //   passYX == 0              → no sprite covers this pixel (likely OAM empty or all offscreen)
+    //   opaque > 0               → we'll have best; priority/compositing is the issue downstream
+    if (frameCount >= 670 && frameCount <= 705 && dbgPassYX > 0) {
+        static int sprSumFrame = -1;
+        static int sprSumCount = 0;
+        if (sprSumFrame != frameCount) { sprSumFrame = frameCount; sprSumCount = 0; }
+        if (sprSumCount < 4) {
+            fprintf(stderr, "[SPR-SUM] F:%d scan=%d x=%d passYX=%d transp=%d opaque=%d haveBest=%d bestColor=$%08X\n",
+                frameCount, y, x, dbgPassYX, dbgTransp, dbgOpaque, haveBest ? 1 : 0, best.color);
+            sprSumCount++;
+        }
+    }
+
+    return haveBest ? best : PixelInfo{0, 0};
 }
 
 // Check if window masking applies to this pixel

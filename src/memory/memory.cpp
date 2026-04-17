@@ -308,6 +308,14 @@ void Memory::write8(uint32_t address, uint8_t value) {
     if (bank == 0x7E || bank == 0x7F) {
         uint32_t wramAddr = (address & 0x1FFFF);
         if (wramAddr < m_wram.size()) {
+            // Log cputest WRAM writes: test opcode area and return handler
+            if (wramAddr <= 0x0003 || wramAddr == 0x8000 || wramAddr == 0x8001) {
+                static int testOpcodeLog = 0;
+                if (testOpcodeLog < 2000) {
+                    fprintf(stderr, "[TESTOP] $7E:%04X=%02X (was %02X)\n", (uint32_t)wramAddr, value, m_wram[wramAddr]);
+                    testOpcodeLog++;
+                }
+            }
             // Log WRAM writes to page 0 ($0000-$00FF) to catch pass/fail flags
             int fcw = m_ppu ? m_ppu->getFrameCount() : -1;
             if (fcw >= 130 && ((wramAddr >= 0x48 && wramAddr <= 0x49) || (wramAddr >= 0x60 && wramAddr <= 0xAF))) {
