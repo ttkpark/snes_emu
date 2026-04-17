@@ -43,6 +43,15 @@ public class Win32 {
     [DllImport("user32.dll")]
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
+    [DllImport("user32.dll", SetLastError=true)]
+    public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern int MapVirtualKey(uint uCode, uint uMapType);
+
+    public const uint WM_KEYDOWN = 0x0100;
+    public const uint WM_KEYUP   = 0x0101;
+
     public static void PressKey(ushort vk) {
         INPUT[] inputs = new INPUT[2];
         inputs[0].type = 1; // INPUT_KEYBOARD
@@ -52,6 +61,15 @@ public class Win32 {
         inputs[1].u.ki.wVk = vk;
         inputs[1].u.ki.dwFlags = 2; // key up
         SendInput(2, inputs, Marshal.SizeOf(typeof(INPUT)));
+    }
+
+    public static void PostKey(IntPtr hWnd, ushort vk) {
+        int scan = MapVirtualKey((uint)vk, 0);
+        IntPtr lParamDown = (IntPtr)((scan << 16) | 1);
+        IntPtr lParamUp   = (IntPtr)(unchecked((int)0xC0000001) | (scan << 16));
+        PostMessage(hWnd, WM_KEYDOWN, (IntPtr)vk, lParamDown);
+        System.Threading.Thread.Sleep(50);
+        PostMessage(hWnd, WM_KEYUP,   (IntPtr)vk, lParamUp);
     }
 }
 "@
@@ -70,7 +88,19 @@ function Focus-Snes9x {
 }
 
 function Send-VK($vk, $pauseMs = 200) {
-    [Win32]::PressKey([uint16]$vk)
+    # Try PostMessage to Snes9x window first (works without focus)
+    $procs = Get-Process snes9x-x64 -ErrorAction SilentlyContinue
+    $sent = $false
+    foreach ($p in $procs) {
+        if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
+            [Win32]::PostKey($p.MainWindowHandle, [uint16]$vk)
+            $sent = $true
+            break
+        }
+    }
+    if (-not $sent) {
+        [Win32]::PressKey([uint16]$vk)
+    }
     Start-Sleep -Milliseconds $pauseMs
 }
 
