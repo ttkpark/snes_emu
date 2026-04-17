@@ -343,9 +343,19 @@ void PPU::step() {
             // Log all NMI enable/disable transitions
             static bool prevNmiLogged = false;
             if (m_nmiEnabled != prevNmiLogged) {
-                fprintf(stderr, "[NMI-TRANSITION] F:%d %d->%d\n",
-                    frameCount, prevNmiLogged, m_nmiEnabled);
+                uint32_t pc = m_cpu ? ((m_cpu->getPBR() << 16) | m_cpu->getPC()) : 0;
+                fprintf(stderr, "[NMI-TRANSITION] F:%d %d->%d cpuPC=$%06X\n",
+                    frameCount, prevNmiLogged, m_nmiEnabled, pc);
                 prevNmiLogged = m_nmiEnabled;
+            }
+            // Sample CPU PC during stuck windows to identify wait loop
+            if (frameCount == 200 || frameCount == 250 || frameCount == 300 ||
+                frameCount == 400 || frameCount == 500) {
+                if (m_cpu) {
+                    uint32_t pc = (m_cpu->getPBR() << 16) | m_cpu->getPC();
+                    fprintf(stderr, "[CPU-PC-SAMPLE] F:%d pc=$%06X nmiEnabled=%d\n",
+                        frameCount, pc, m_nmiEnabled);
+                }
             }
             // Toggle interlace field bit each frame when $2133 bit0 (INTERLACE) is set
             if (m_setini & 0x01) {
