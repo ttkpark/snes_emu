@@ -829,13 +829,12 @@ int main(int argc, char* argv[]) {
             }
 
             // Save BMP snapshot at specific frames for visual diff against Snes9x reference
-            if (frameCount == 30 || frameCount == 60 || frameCount == 90 ||
-                frameCount == 120 || frameCount == 180 || frameCount == 300 ||
-                frameCount == 450 || frameCount == 600 || frameCount == 670 ||
-                frameCount == 700 || frameCount == 750 || frameCount == 800 ||
-                frameCount == 900 || frameCount == 1000 ||
-                frameCount == 1200 || frameCount == 1400 || frameCount == 1600 ||
-                frameCount == 1800 || frameCount == 2000) {
+            if (frameCount == 30 || frameCount == 60 || frameCount == 120 ||
+                frameCount == 180 || frameCount == 300 || frameCount == 600 ||
+                frameCount == 1000 || frameCount == 1500 || frameCount == 2000 ||
+                frameCount == 2500 || frameCount == 3000 || frameCount == 3500 ||
+                frameCount == 4000 || frameCount == 4200 || frameCount == 4500 ||
+                frameCount == 5000) {
                 const uint32_t W = PPU::SCREEN_WIDTH, H = PPU::SCREEN_HEIGHT;
                 uint32_t rowBytes = ((W * 3 + 3) & ~3u);
                 uint32_t dataSz  = rowBytes * H;
