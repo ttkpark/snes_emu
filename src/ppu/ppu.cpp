@@ -407,6 +407,15 @@ void PPU::step() {
             snprintf(fname, sizeof(fname), "vram_f%d.txt", frameCount);
             dumpVRAMHex(fname);
         }
+        // Dump VRAM at Color Test frames to diagnose rendering differences
+        if (frameCount == 1850 || frameCount == 1900 || frameCount == 2000) {
+            char fname[64];
+            snprintf(fname, sizeof(fname), "vram_colortest_f%d.txt", frameCount);
+            dumpVRAMHex(fname);
+            char cfname[64];
+            snprintf(cfname, sizeof(cfname), "cgram_colortest_f%d.txt", frameCount);
+            dumpCGRAM(cfname);
+        }
         // --- TC-01 main menu diagnosis: CGRAM/VRAM dumps at critical frames ---
         // Captures state at: TC-01 main menu (60), TC-02 entry (120), TC-02 mid (200),
         // TC-03 (300), later screens (450, 600)
