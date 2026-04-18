@@ -869,27 +869,16 @@ int main(int argc, char* argv[]) {
             }
 
             // Save BMP snapshot at specific frames for visual diff against Snes9x reference
-            if (frameCount == 30 || frameCount == 60 || frameCount == 120 ||
+            // Simplified condition: capture key frames + entire Color Test range (1800-2100)
+            bool shouldCapture = (frameCount >= 1800 && frameCount <= 2100) ||
+                frameCount == 30 || frameCount == 60 || frameCount == 120 ||
                 frameCount == 180 || frameCount == 300 || frameCount == 450 ||
                 frameCount == 540 || frameCount == 580 || frameCount == 600 ||
-                frameCount == 900 || frameCount == 920 || frameCount == 940 ||
-                frameCount == 950 || frameCount == 955 || frameCount == 960 ||
-                frameCount == 965 || frameCount == 970 || frameCount == 980 ||
-                frameCount == 1000 ||
-                frameCount == 1050 || frameCount == 1100 || frameCount == 1150 ||
-                frameCount == 1200 || frameCount == 1250 || frameCount == 1300 ||
-                frameCount == 1350 || frameCount == 1400 || frameCount == 1410 ||
-                frameCount == 1420 || frameCount == 1430 || frameCount == 1440 ||
-                frameCount == 1450 ||
-                frameCount == 1500 || frameCount == 1550 || frameCount == 1600 ||
-                frameCount == 1650 || frameCount == 1700 || frameCount == 1720 ||
-                frameCount == 1750 || frameCount == 1800 || frameCount == 1850 ||
-                frameCount == 1900 || frameCount == 1950 ||
-                frameCount == 2000 || frameCount == 2100 || frameCount == 2200 ||
-                frameCount == 2300 || frameCount == 2400 || frameCount == 2500 ||
-                frameCount == 3000 ||
-                frameCount == 3500 || frameCount == 4000 || frameCount == 4200 ||
-                frameCount == 4500 || frameCount == 5000) {
+                frameCount == 900 || frameCount == 1000 ||
+                frameCount == 2200 || frameCount == 2500 || frameCount == 3000 ||
+                frameCount == 3500 || frameCount == 4000 || frameCount == 4500 ||
+                frameCount == 5000;
+            if (shouldCapture) {
                 const uint32_t W = PPU::SCREEN_WIDTH, H = PPU::SCREEN_HEIGHT;
                 uint32_t rowBytes = ((W * 3 + 3) & ~3u);
                 uint32_t dataSz  = rowBytes * H;
