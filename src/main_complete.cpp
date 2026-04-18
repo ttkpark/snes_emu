@@ -830,11 +830,21 @@ int main(int argc, char* argv[]) {
 
             // Save BMP snapshot at specific frames for visual diff against Snes9x reference
             if (frameCount == 30 || frameCount == 60 || frameCount == 120 ||
-                frameCount == 180 || frameCount == 300 || frameCount == 600 ||
-                frameCount == 1000 || frameCount == 1500 || frameCount == 2000 ||
-                frameCount == 2500 || frameCount == 3000 || frameCount == 3500 ||
-                frameCount == 4000 || frameCount == 4200 || frameCount == 4500 ||
-                frameCount == 5000) {
+                frameCount == 180 || frameCount == 300 || frameCount == 450 ||
+                frameCount == 540 || frameCount == 580 || frameCount == 600 ||
+                frameCount == 900 || frameCount == 920 || frameCount == 940 ||
+                frameCount == 950 || frameCount == 955 || frameCount == 960 ||
+                frameCount == 965 || frameCount == 970 || frameCount == 980 ||
+                frameCount == 1000 ||
+                frameCount == 1050 || frameCount == 1100 || frameCount == 1150 ||
+                frameCount == 1200 || frameCount == 1250 || frameCount == 1300 ||
+                frameCount == 1350 || frameCount == 1400 || frameCount == 1410 ||
+                frameCount == 1420 || frameCount == 1430 || frameCount == 1440 ||
+                frameCount == 1450 ||
+                frameCount == 1500 ||
+                frameCount == 2000 || frameCount == 2500 || frameCount == 3000 ||
+                frameCount == 3500 || frameCount == 4000 || frameCount == 4200 ||
+                frameCount == 4500 || frameCount == 5000) {
                 const uint32_t W = PPU::SCREEN_WIDTH, H = PPU::SCREEN_HEIGHT;
                 uint32_t rowBytes = ((W * 3 + 3) & ~3u);
                 uint32_t dataSz  = rowBytes * H;
@@ -898,7 +908,20 @@ int main(int argc, char* argv[]) {
 
             // Snapshot WRAM[$0000-$00FF] at each frame during test window to find fail flag
             bool isFinalFrame = (maxFrames > 0 && frameCount == maxFrames);
-            if ((frameCount >= 168 && frameCount <= 178) || frameCount == 200 || frameCount == 220 || frameCount == 240 || frameCount == 280 || frameCount == 340 || frameCount == 400 || frameCount == 450 || frameCount == 500 || frameCount == 600 || frameCount == 700 || frameCount == 800 || frameCount == 900 || frameCount == 1000 || frameCount == 1100 || frameCount == 1200 || isFinalFrame) {
+            if ((frameCount >= 168 && frameCount <= 178) || frameCount == 200 || frameCount == 220 || frameCount == 240 || frameCount == 280 || frameCount == 340 || frameCount == 400 || frameCount == 450 || frameCount == 500 || frameCount == 600 || frameCount == 680 || frameCount == 700 || frameCount == 800 || frameCount == 900 || frameCount == 1000 || frameCount == 1100 || frameCount == 1200 || frameCount == 1400 || frameCount == 1410 || frameCount == 1415 || frameCount == 1420 || frameCount == 1425 || isFinalFrame) {
+                // Dump key Phase 2 state flags found via NMI handler disassembly
+                const auto& w = memory.getWRAM();
+                static uint64_t prevCycles = 0;
+                static uint64_t prevFrame = 0;
+                uint64_t cyc = cpu.getCycles();
+                uint64_t dCyc = (prevCycles > 0) ? (cyc - prevCycles) : 0;
+                uint64_t dFrame = (prevFrame > 0) ? (frameCount - prevFrame) : 1;
+                double cycPerFrame = dFrame > 0 ? (double)dCyc / dFrame : 0;
+                fprintf(stderr, "[PHASE-FLAGS] F:%llu $20=%02X $23=%02X $00A1=%02X $48=%02X cyc=%llu dCyc=%llu cpf=%.0f\n",
+                    (unsigned long long)frameCount, w[0x0020], w[0x0023], w[0x00A1], w[0x0048],
+                    (unsigned long long)cyc, (unsigned long long)dCyc, cycPerFrame);
+                prevCycles = cyc;
+                prevFrame = frameCount;
                 const auto& wram = memory.getWRAM();
                 fprintf(stderr, "[SNAP] F:%llu WRAM[00..7F]:", (unsigned long long)frameCount);
                 for (int i = 0; i < 0x80; i++) {

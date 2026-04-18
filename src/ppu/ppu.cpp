@@ -320,8 +320,12 @@ void PPU::step() {
     if (m_dot >= 341) {
         m_dot = 0;
 
-        // Render scanline when it completes
-        if (m_scanline < SCREEN_HEIGHT) {
+        // Render scanline when it completes.
+        // SNES hardware: scanline 0 is the overscan / first VBlank-ended line and does
+        // NOT produce visible output (bsnes/ares skip vcounter=0). Visible scanlines are
+        // 1..224, rendered into framebuffer rows 0..223. This matches the 1-line shift
+        // observed against snes9x reference captures for TC-01 menu.
+        if (m_scanline >= 1 && m_scanline <= SCREEN_HEIGHT) {
             renderScanline();
         }
 
@@ -350,7 +354,10 @@ void PPU::step() {
             }
             // Sample CPU PC during stuck windows to identify wait loop
             if (frameCount == 200 || frameCount == 250 || frameCount == 300 ||
-                frameCount == 400 || frameCount == 500) {
+                frameCount == 400 || frameCount == 500 ||
+                frameCount == 1400 || frameCount == 1410 || frameCount == 1415 ||
+                frameCount == 1418 || frameCount == 1420 || frameCount == 1422 ||
+                frameCount == 1425 || frameCount == 1430) {
                 if (m_cpu) {
                     uint32_t pc = (m_cpu->getPBR() << 16) | m_cpu->getPC();
                     fprintf(stderr, "[CPU-PC-SAMPLE] F:%d pc=$%06X nmiEnabled=%d\n",
@@ -621,12 +628,11 @@ void PPU::renderScanline() {
     // Check if forced blank is enabled
     if (m_forcedBlank) {
         // SNES hardware: forced blank outputs black (transparent backdrop).
-        // Previous code kept stale frame data, which prevented scene transitions
-        // from being visible (e.g., test ROM TC-02..TC-11 never appeared).
-        int y = m_scanline;
-        if (y >= 0 && y < SCREEN_HEIGHT) {
+        // Visible scanlines 1..SCREEN_HEIGHT map to framebuffer rows 0..SCREEN_HEIGHT-1.
+        int fbRow = m_scanline - 1;
+        if (fbRow >= 0 && fbRow < SCREEN_HEIGHT) {
             for (int x = 0; x < SCREEN_WIDTH; x++) {
-                m_framebuffer[y * SCREEN_WIDTH + x] = 0xFF000000; // opaque black
+                m_framebuffer[fbRow * SCREEN_WIDTH + x] = 0xFF000000; // opaque black
             }
         }
         return;
@@ -1049,7 +1055,9 @@ void PPU::renderScanline() {
             finalColor = r | (g << 8) | (b << 16) | (a << 24);
         }
 
-        m_framebuffer[m_scanline * SCREEN_WIDTH + x] = finalColor;
+        // Map scanline 1..SCREEN_HEIGHT to framebuffer rows 0..SCREEN_HEIGHT-1
+        int fbRow = m_scanline - 1;
+        m_framebuffer[fbRow * SCREEN_WIDTH + x] = finalColor;
     }
     
 #ifdef DEBUG_PPU_RENDER
@@ -2394,9 +2402,6 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
     Logger::getInstance().logPPU(oss.str());
         // Don't flush here - too frequent, causes performance issues
     }
-    // Static warning flags (declared outside switch to avoid initialization issues)
-    static bool warnedColorMath = false;
-    
     switch (address) {
         case 0x2100: { // INIDISP - Screen Display
             bool prevFB = m_forcedBlank;
@@ -2761,6 +2766,15 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
               }
               m_cgramAddress++;
               m_cgramAddress &= 0x01FF;
+              // Log Color Test palette loads (F:1700-2100)
+              if (frameCount >= 1700 && frameCount <= 2100 && (m_cgramAddress - 1) % 2 == 0) {
+                  static int colorLogCount = 0;
+                  if (colorLogCount < 1000) {
+                      fprintf(stderr, "[CGRAM-CT] F:%u $2121=%03X $2122=%02X\n",
+                              (unsigned)frameCount, (unsigned)(m_cgramAddress - 1), (unsigned)value);
+                      colorLogCount++;
+                  }
+              }
               if (m_cgramAddress <= 10) {
                   std::ostringstream oss;
                   oss << "[Cyc:" << std::dec << std::setw(10) << std::setfill('0')
@@ -3020,10 +3034,6 @@ void PPU::writeRegister(uint16_t address, uint8_t value) {
             
         case 0x2130: // CGWSEL - Color Math Control
             m_cgws = value;
-            if (!warnedColorMath) {
-                std::cout << "[WARN] Color Math (CGWSEL/CGADSUB/COLDATA) not implemented - special transparency/lighting effects do not work." << std::endl;
-                warnedColorMath = true;
-            }
             break;
             
         case 0x2131: // CGADSUB - Color Math Settings
@@ -3601,18 +3611,11 @@ uint32_t PPU::renderSprites(int x, int y) {
 
 PixelInfo PPU::renderSpritePixel(int x, int y) {
     // ---- Decode OBSEL ($2101) ----
-    // NOTE: spec says base = (BBB & 7) × $2000 byte (FullSNES docs) but
-    // "SNES Test Program.sfc" writes OBSEL=$03/$23 while actual sprite tile data
-    // lives at VRAM byte 0x0000 (verified via VRAM dumps at F:685/F:2000).
-    // Using base=0 yields 546+ SPR-HIT composites; the spec formula yields 0.
-    // Candidate explanations (unverified): CPU writes 16-bit to $2100 treating
-    // $2101 as high byte with different semantics, or ROM's test path stages
-    // sprite tiles at shared BG tile base ignoring OBSEL.BBB for this ROM.
-    // Leaving spec formula commented out for reference; production fix needed.
-    uint32_t nameBase0 = 0;  // Empirical: ROM stages sprite tiles at byte 0
-    // uint32_t nameBase0 = (uint32_t)(m_objSize & 0x07) << 13;  // spec formula
+    // Standard SNES formula: sprite tile base byte address = (bits & 7) << 14
+    // name select gap (bytes) = (N+1) << 13
+    uint32_t nameBase0 = ((uint32_t)(m_objSize & 0x07)) << 14;
     uint8_t nameSelect = (m_objSize >> 3) & 0x03;
-    uint32_t nameBase1 = nameBase0 + (uint32_t)(nameSelect + 1) * 0x1000;
+    uint32_t nameBase1 = (nameBase0 + (((uint32_t)(nameSelect) + 1) << 13)) & 0xFFFF;
 
     // --- Diagnostic: dump OAM + sprite eval context once per frame for target frames ---
     // Limited to frames 670-705 (post TC-02 OBJ enable) to avoid log flooding.
