@@ -383,6 +383,7 @@ void PPU::step() {
     // V-Blank period (scanlines 225-261)
     // SNES has 262 scanlines total: 224 visible + 1 pre-render + 37 VBlank
     if (m_scanline >= 262) {
+
         m_scanline = 0;
         m_dot = 0;
         m_frameReady = true;
@@ -553,20 +554,6 @@ void PPU::step() {
                 fprintf(stderr, "[VRAM685] BG1tiledata@byte0x%04X BG4tiledata@byte0x%04X\n",
                     m_bgTileAddr[0], m_bgTileAddr[3]);
             }
-        }
-
-        // Dump CGRAM at Color Test key frames to diagnose palette issue
-        if (frameCount >= 1845 && frameCount <= 2005 && frameCount % 50 == 0) {
-            uint16_t pal0 = m_cgram[0] | (m_cgram[1] << 8);
-            uint8_t r = pal0 & 0x1F;
-            uint8_t g = (pal0 >> 5) & 0x1F;
-            uint8_t b = (pal0 >> 10) & 0x1F;
-            uint8_t r8 = (r << 3) | (r >> 2);
-            uint8_t g8 = (g << 3) | (g >> 2);
-            uint8_t b8 = (b << 3) | (b >> 2);
-            fprintf(stderr, "[PAL-DBG] F:%llu CGRAM[0]=$%04X -> RGB888=(%3d,%3d,%3d) raw=$%02X%02X\n",
-                (unsigned long long)frameCount, (unsigned)pal0, (int)r8, (int)g8, (int)b8,
-                (unsigned)m_cgram[1], (unsigned)m_cgram[0]);
         }
 
         // Log BG register state once after NMI starts
