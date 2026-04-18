@@ -556,20 +556,17 @@ void PPU::step() {
         }
 
         // Dump CGRAM at Color Test key frames to diagnose palette issue
-        if (frameCount == 1850 || frameCount == 1900 || frameCount == 1950 || frameCount == 2000) {
-            fprintf(stderr, "[CGRAM%llu] Palette debug - Full CGRAM[0-63]:\n", (unsigned long long)frameCount);
-            for (int i = 0; i < 64; i += 2) {
-                uint16_t col = m_cgram[i] | (m_cgram[i+1] << 8);
-                uint8_t r = col & 0x1F;
-                uint8_t g = (col >> 5) & 0x1F;
-                uint8_t b = (col >> 10) & 0x1F;
-                // Convert to 8-bit for display
-                uint8_t r8 = (r << 3) | (r >> 2);
-                uint8_t g8 = (g << 3) | (g >> 2);
-                uint8_t b8 = (b << 3) | (b >> 2);
-                fprintf(stderr, "  CGRAM[%3d]=$%04X RGB555=(%2d,%2d,%2d) -> RGB888=(%3d,%3d,%3d)\n",
-                    i, (unsigned)col, (int)r, (int)g, (int)b, (int)r8, (int)g8, (int)b8);
-            }
+        if (frameCount == 1850 || frameCount == 1900 || frameCount == 2000) {
+            uint16_t pal0 = m_cgram[0] | (m_cgram[1] << 8);
+            uint8_t r = pal0 & 0x1F;
+            uint8_t g = (pal0 >> 5) & 0x1F;
+            uint8_t b = (pal0 >> 10) & 0x1F;
+            uint8_t r8 = (r << 3) | (r >> 2);
+            uint8_t g8 = (g << 3) | (g >> 2);
+            uint8_t b8 = (b << 3) | (b >> 2);
+            fprintf(stderr, "[PAL-DBG] F:%llu CGRAM[0]=$%04X -> RGB888=(%3d,%3d,%3d) raw_bytes=$%02X%02X\n",
+                (unsigned long long)frameCount, (unsigned)pal0, (int)r8, (int)g8, (int)b8,
+                (unsigned)m_cgram[1], (unsigned)m_cgram[0]);
         }
 
         // Log BG register state once after NMI starts
