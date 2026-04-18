@@ -80,6 +80,8 @@ public:
     uint16_t getVRAMAddress() const { return m_vramAddress; }  // Diagnostic: current VRAM word address
     uint16_t getOAMAddress() const { return m_oamAddress; }  // Diagnostic: current OAM byte address
     int getFrameCount() const;  // Diagnostic: current frame count
+    uint8_t getBGMode() const { return m_bgMode; }  // Diagnostic: current BG mode
+    uint8_t getMainScreenDesignation() const { return m_mainScreenDesignation; }  // Diagnostic: main screen layer enable
     // Returns VBlank start scanline based on $2133 OVERSCAN bit:
     // bit2=0 → 225 (NTSC standard), bit2=1 → 240 (OVERSCAN/PAL-like)
     int getVBlankStart() const { return (m_setini & 0x04) ? 240 : 225; }

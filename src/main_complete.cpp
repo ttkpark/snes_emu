@@ -811,6 +811,22 @@ int main(int argc, char* argv[]) {
             ppu.renderFrame();
             ppu.clearFrameReady();
 
+            // Debug COLOR BAR at F:2000
+            if (frameCount == 2000) {
+                fprintf(stderr, "\n[F2000-DEBUG] COLOR BAR Test Frame - PPU Config:\n");
+                fprintf(stderr, "  BGMode=%d MainScreen=$%02X (Layers: BG1=%d BG2=%d BG3=%d BG4=%d OBJ=%d)\n",
+                    ppu.getBGMode(), ppu.getMainScreenDesignation(),
+                    (ppu.getMainScreenDesignation() & 1) ? 1 : 0,
+                    (ppu.getMainScreenDesignation() & 2) ? 1 : 0,
+                    (ppu.getMainScreenDesignation() & 4) ? 1 : 0,
+                    (ppu.getMainScreenDesignation() & 8) ? 1 : 0,
+                    (ppu.getMainScreenDesignation() & 16) ? 1 : 0);
+                fflush(stderr);
+            } else if (frameCount >= 1998 && frameCount <= 2002) {
+                fprintf(stderr, "[Frame check] frameCount=%llu\n", frameCount);
+                fflush(stderr);
+            }
+
             // Post-process framebuffer to remove brownish artifacts in Color Test
             // Brownish (49,57,49) appears at <1% - replace with black (0,0,0)
             if (frameCount >= 1845 && frameCount <= 3600) {

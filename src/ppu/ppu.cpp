@@ -589,13 +589,37 @@ void PPU::step() {
 void PPU::renderScanline() {
     // Diagnostic: dump PPU state at key frames
     // Color Test window diagnostic
-    if (m_scanline == 0 && (frameCount == 1850 || frameCount == 1900 || frameCount == 1950 || frameCount == 2000)) {
-        fprintf(stderr, "[COLORTEST] F:%d TM=%02X TS=%02X Mode=%d W12=%02X W34=%02X WOBJ=%02X WH=(%d-%d,%d-%d) TMW=%02X TSW=%02X CGWS=%02X CGAD=%02X FIX=(%d,%d,%d) SETINI=%02X\n",
-            frameCount, m_mainScreenDesignation, m_subScreenDesignation, m_bgMode,
-            m_w12sel, m_w34sel, m_wobjsel,
-            (int)m_wh0, (int)m_wh1, (int)m_wh2, (int)m_wh3,
-            m_tmw, m_tsw, m_cgws, m_cgadsub,
-            (int)m_coldataR, (int)m_coldataG, (int)m_coldataB, m_setini);
+    if (m_scanline == 0 && frameCount == 2000) {
+        fprintf(stderr, "\n[COLOR-BAR-F2000-DEBUG] Frame 2000 (COLOR BAR) scanline 0:\n");
+        fprintf(stderr, "  Mode=%d TM=$%02X (layers: BG1=%d BG2=%d BG3=%d BG4=%d OBJ=%d)\n",
+            (int)m_bgMode, (int)m_mainScreenDesignation,
+            (m_mainScreenDesignation & 1) ? 1 : 0,
+            (m_mainScreenDesignation & 2) ? 1 : 0,
+            (m_mainScreenDesignation & 4) ? 1 : 0,
+            (m_mainScreenDesignation & 8) ? 1 : 0,
+            (m_mainScreenDesignation & 16) ? 1 : 0);
+        for (int i = 0; i < 4; i++) {
+            fprintf(stderr, "  BG%d: MapAddr=$%04X TileAddr=$%04X Scroll=(%3d,%3d) MapSize=%d\n",
+                i+1, (unsigned)m_bgMapAddr[i], (unsigned)m_bgTileAddr[i],
+                (i==0) ? (int)m_bg1ScrollX : (i==1) ? (int)m_bg2ScrollX : (i==2) ? (int)m_bg3ScrollX : (int)m_bg4ScrollX,
+                (i==0) ? (int)m_bg1ScrollY : (i==1) ? (int)m_bg2ScrollY : (i==2) ? (int)m_bg3ScrollY : (int)m_bg4ScrollY,
+                (int)m_bgMapSize[i]);
+        }
+        fprintf(stderr, "  OBJ: OBSEL=$%02X (size=%d base=$%04X)\n", m_objSize,
+            (m_objSize & 7), ((m_objSize & 0xE0) << 9));
+
+        // Dump first few palette entries
+        fprintf(stderr, "  CGRAM[0..15] (BG1 palette 0):");
+        for (int i = 0; i < 16; i++) {
+            uint16_t c = m_cgram[i*2] | (m_cgram[i*2+1] << 8);
+            fprintf(stderr, " %04X", c);
+        }
+        fprintf(stderr, "\n  CGRAM[256..271] (OBJ palette 0):");
+        for (int i = 0; i < 16; i++) {
+            uint16_t c = m_cgram[256+i*2] | (m_cgram[256+i*2+1] << 8);
+            fprintf(stderr, " %04X", c);
+        }
+        fprintf(stderr, "\n\n");
     }
     if (m_scanline == 0 && (frameCount == 80 || frameCount == 685 || frameCount == 700)) {
         // OAM first 2 sprites
