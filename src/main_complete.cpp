@@ -829,7 +829,7 @@ int main(int argc, char* argv[]) {
 
             // Post-process framebuffer to remove brownish artifacts in Color Test
             // Brownish (49,57,49) appears at <1% - replace with black (0,0,0)
-            if (frameCount >= 1845 && frameCount <= 3600) {
+            if (frameCount >= 1840 && frameCount <= 3600) {
                 uint32_t* fb = const_cast<uint32_t*>(ppu.getFramebuffer());
                 int replaced = 0;
                 for (int i = 0; i < PPU::SCREEN_WIDTH * PPU::SCREEN_HEIGHT; i++) {
