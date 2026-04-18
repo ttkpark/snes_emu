@@ -153,3 +153,14 @@ Located in `docs/hardware/` - these are the authoritative SNES hardware specs:
 3. **DMA/HDMA** - bulk data transfer
 4. **System integration** - CPU/PPU/APU timing sync, NMI/IRQ
 5. **Super Mario World boot** - title screen and gameplay
+
+## 하네스: SNES Emulator
+
+**목표:** 전문가 에이전트 팀으로 SNES 에뮬레이터 버그를 수정하고 마일스톤을 달성한다
+
+**트리거:** SNES 에뮬레이터 버그 수정, 기능 구현, 테스트 검증 작업 시 `snes-emu` 스킬을 사용하라. 단순 코드 질문은 직접 응답 가능.
+
+**변경 이력:**
+| 날짜 | 변경 내용 | 대상 | 사유 |
+|------|----------|------|------|
+| 2026-04-11 | 초기 구성 | 전체 | 에이전트 정의 기반 스킬 체계 구축 |

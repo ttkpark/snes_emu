@@ -1124,10 +1124,10 @@ void Memory::performAutoJoypadRead() {
     if (!m_autoJoypadEnabled || !m_input) {
         return;
     }
-    // Set busy flag; hardware takes ~4224 master cycles (~2 scanlines at 1364/scanline)
-    // We approximate as busy for ~2 scanline transitions
+    // Hardware: auto-joypad takes ~4224 master cycles = ~3.1 scanlines at 1364 cycles/scanline.
+    // 2 scanlines was rounding down; 3 matches hardware more closely.
     m_autoJoypadBusy = true;
-    m_autoJoypadBusyCountdown = 2;
+    m_autoJoypadBusyCountdown = 3;
 
     // Hardware behavior: the auto-joypad process pulses the /LATCH pin at VBlank start,
     // which sets the H/V counter latch flag (bit7 of $213F / STAT78), exactly as if

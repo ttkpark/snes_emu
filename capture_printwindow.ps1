@@ -57,15 +57,24 @@ Write-Host "Snes9x hWnd: $h"
 $ok = [PWCap]::Save($h, "$OutputDir\tc01_menu.png")
 Write-Host "TC-01 menu captured: $ok"
 
-# Let the ROM auto-cycle through Electronics Test (no input needed, it auto-demos?)
-# Or press Enter via keybd_event to start
+# Snes9x default keys: START=Space (VK_SPACE=0x20, scan=0x39), SELECT=Enter
+# Ensure snes9x has focus before injection
 Add-Type -Namespace Win32 -Name API -MemberDefinition @'
 [DllImport("user32.dll")]
 public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+[DllImport("user32.dll")]
+public static extern bool SetForegroundWindow(IntPtr hWnd);
+[DllImport("user32.dll")]
+public static extern bool ShowWindow(IntPtr hWnd, int cmd);
 '@
-[Win32.API]::keybd_event(0x0D, 0x1C, 0, [UIntPtr]::Zero)
+[Win32.API]::ShowWindow($h, 9) | Out-Null
+[Win32.API]::SetForegroundWindow($h) | Out-Null
+Start-Sleep -Milliseconds 400
+
+# Press Space (START) to enter Electronics Test
+[Win32.API]::keybd_event(0x20, 0x39, 0, [UIntPtr]::Zero)
 Start-Sleep -Milliseconds 100
-[Win32.API]::keybd_event(0x0D, 0x1C, 2, [UIntPtr]::Zero)
+[Win32.API]::keybd_event(0x20, 0x39, 2, [UIntPtr]::Zero)
 Start-Sleep -Seconds 3
 
 # Capture over time
