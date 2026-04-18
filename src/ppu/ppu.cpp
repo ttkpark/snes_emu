@@ -556,7 +556,7 @@ void PPU::step() {
         }
 
         // Dump CGRAM at Color Test key frames to diagnose palette issue
-        if (frameCount == 1850 || frameCount == 1900 || frameCount == 2000) {
+        if (frameCount >= 1845 && frameCount <= 2005 && frameCount % 50 == 0) {
             uint16_t pal0 = m_cgram[0] | (m_cgram[1] << 8);
             uint8_t r = pal0 & 0x1F;
             uint8_t g = (pal0 >> 5) & 0x1F;
@@ -564,7 +564,7 @@ void PPU::step() {
             uint8_t r8 = (r << 3) | (r >> 2);
             uint8_t g8 = (g << 3) | (g >> 2);
             uint8_t b8 = (b << 3) | (b >> 2);
-            fprintf(stderr, "[PAL-DBG] F:%llu CGRAM[0]=$%04X -> RGB888=(%3d,%3d,%3d) raw_bytes=$%02X%02X\n",
+            fprintf(stderr, "[PAL-DBG] F:%llu CGRAM[0]=$%04X -> RGB888=(%3d,%3d,%3d) raw=$%02X%02X\n",
                 (unsigned long long)frameCount, (unsigned)pal0, (int)r8, (int)g8, (int)b8,
                 (unsigned)m_cgram[1], (unsigned)m_cgram[0]);
         }
