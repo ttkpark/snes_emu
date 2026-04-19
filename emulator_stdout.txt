@@ -1,0 +1,314 @@
+SNES Emulator - Complete SDL2 Version
+Loading ROM from command line: SNES Test Program.sfc
+ROM loaded: 1048576 bytes
+Initializing components...
+Connecting components...
+Loading ROM into memory...
+ROM loaded into memory: 1048576 bytes
+Font data check at ROM offset 0x4D2C (first 16 bytes): ff b7 00 98 00 15 00 e6 ff b7 00 98 00 18 00 e3 
+Font data check at ROM offset 0x502C (char '0', first 16 bytes): ff d7 ff db ff 95 00 4d ff d3 ff d8 ff 94 00 4e 
+ROM loaded into memory successfully.
+
+=== SNES ROM Mapping Analysis ===
+ROM Size: 1048576 bytes
+
+=== ROM Header Analysis ===
+
+=== LoROM Header Analysis ===
+  LoROM Header at 0x7FC0
+  ROM Type (0x7FD5): 0x0 (Not LoROM)
+
+=== HiROM Header Analysis ===
+  HiROM Header at 0xFFC0
+  ROM Type (0xFFD5): 0x20 (Other ROM type)
+  -> HiROM mapping detected
+  ROM Size      : 1KB
+  ROM File Size : 1024KB
+
+=== ExHiROM Header Analysis ===
+  ROM too small for ExHiROM header
+  ROM Size: 1048576 bytes
+  Headered ROM: No
+
+=== Checksum Verification ===
+  HiROM Checksum: INVALID
+  All checksums invalid, validating reset vectors...
+  LoROM reset=0x8000 code=VALID
+  HiROM reset=0xf000 code=INVALID
+
+=== Final Mapping Determination ===
+  -> LoROM mapping detected
+ROM Mapping set to: LoROM
+
+=== CPU Vector Reading Analysis ===
+ROM Name: 
+[WARN] DSP-1/2/3/4 detected (chipset=0x0) - not implemented; ROM may not run.
+Detected Mapping: LoROM
+Vector Base: 0xffe0
+
+SNES INTERRUPT VECTORS (native):
+  COP  :  0xFFE4 -> 0x700
+  BRK  :  0xFFE6 -> 0x0
+(Abort):  0xFFE8 -> 0x0
+  NMI  :  0xFFEA -> 0x0
+ (N/A) :  0xFFEC -> 0x700
+  IRQ  :  0xFFEE -> 0x0
+
+SNES INTERRUPT VECTORS (6502 emulation):
+ COP   :  0xFFF4 -> 0xf000
+ (N/A) :  0xFFF6 -> 0x1000
+(Abort):  0xFFF8 -> 0x1000
+ NMI   :  0xFFFA -> 0x1000
+ RST   :  0xFFFC -> 0xf000
+ IRQBRK:  0xFFFE -> 0x0
+m_headerPhysicalAddress : ffe0 = 7fe0
+
+Vector Address Contents:
+  Using Emulation Mode vectors (0xFFF4-0xFFFF)
+  Vector 0: 0x0 -> INVALID ADDRESS
+  Vector 1: 0x1200 -> INVALID ADDRESS
+  Vector 2: 0x0 -> INVALID ADDRESS
+  Vector 3: 0x8283 -> ROM[0x283] = 0x4 (Unknown)
+  Vector 4: 0x8000 -> ROM[0x0] = 0x18 (Unknown)
+  Vector 5: 0x100 -> INVALID ADDRESS
+
+Raw Vector Data:
+  (0xffe0): 0x0  (0xffe1): 0x0
+  (0xffe2): 0x0  (0xffe3): 0x0
+  (0xffe4): 0x0  (0xffe5): 0x0
+  (0xffe6): 0x0  (0xffe7): 0x40
+  (0xffe8): 0x2  (0xffe9): 0x0
+  (0xffea): 0x38  (0xffeb): 0xb1
+  (0xffec): 0x0  (0xffed): 0x0
+  (0xffee): 0x7b  (0xffef): 0xb3
+=== End Vector Analysis ===
+
+About to call ppu.loadROMData()...
+ppu.loadROMData() completed.
+PPU: Video initialized - 256x224
+CPU Reset: Vector=0x8000, PC=0x8000, PBR=0x0
+Initializing PPU registers...
+PPU: BG1HOFS=$0, ScrollX=0x0
+[WARN] SETINI($2133) - Interlace/Overscan/External Sync not implemented - only registers are stored.
+PPU registers initialized.
+
+=== ORIGINAL ROM HEADER VECTORS ===
+Address: 0000fff4 0000fff6 0000fff8 0000fffa 0000fffc 0000fffe 
+Data:    00000700 00000000 00000000 00000000 00000700 00000000 
+
+=== INITIALIZATION COMPLETE - VECTORS ===
+Address: 0000fff4 0000fff6 0000fff8 0000fffa 0000fffc 0000fffe 
+Data:    00000000 00001200 00000000 00008283 00008000 00000100 
+
+=== VECTOR COMPARISON ===
+Vector Comparison:
+Index | Original | Current  | Status
+------|----------|----------|--------
+  0   | 0x000700 | 0x000000 | DIFF
+  1   | 0x000000 | 0x001200 | DIFF
+  2   | 0x000000 | 0x000000 | SAME
+  3   | 0x000000 | 0x008283 | DIFF
+  4   | 0x000700 | 0x008000 | DIFF
+  5   | 0x000000 | 0x000100 | DIFF
+Starting emulation loop...
+Controls: Arrow keys, Z/X/A/S for buttons
+[WARN] PPU timing is simplified (341 dots/scanline, 262 lines). Precise NTSC/PAL timing, H/V-blank DMA windows, and mid-scanline effects are not emulated yet.
+[HDMA] initHDMA() called ??initialising enabled channels.
+[Cyc:43896] DEX: X=47, Zero=false, Negative=false
+[Cyc:43908] DEX: X=46, Zero=false, Negative=false
+[Cyc:43920] DEX: X=45, Zero=false, Negative=false
+PPU: VRAM hex dump saved to vram_dump.txt
+
+PPU: Key VRAM regions analysis:
+========================================
+BG1 Tilemap (0x0000-0x07FF, 2048 bytes):
+  Non-zero bytes: 0 / 2048
+  Non-zero tilemap entries: 0 / 1024
+  Status: ALL ZEROS
+
+BG1 Tiles at 0x4000 (2bpp, 16 bytes/tile):
+  Non-zero bytes: 0 / 16384
+  Tiles with data: 0 / 1024
+  Status: ALL ZEROS
+
+BG1 Tiles at 0x8000 (2bpp, 16 bytes/tile):
+  Non-zero bytes: 0 / 16384
+  Tiles with data: 0 / 1024
+  Status: ALL ZEROS
+
+Overall VRAM statistics:
+  Total non-zero bytes: 0 / 65536 (0%)
+========================================
+
+PPU: CGRAM dump saved to cgram_dump.txt
+PPU: VRAM and CGRAM dumps completed after frame 15
+PPU: BG1HOFS=$0, ScrollX=0x0
+PPU: BG1HOFS=$0, ScrollX=0x0
+PPU: NMI DISABLED IRQmode=0 (value=$0) scan=161 nmiFlag=0 alreadyFired=0
+  DMA Ch0: CPU->PPU Mode=1 Size=0 Src=0x0 Dst=0x2118
+  DMA Ch0: CPU->PPU Mode=1 Size=0 Src=0x0 Dst=0x2118
+  DMA Ch7: CPU->PPU Mode=1 Size=16384 Src=0x18000 Dst=0x2118
+  DMA Ch7: CPU->PPU Mode=1 Size=2048 Src=0x7f0000 Dst=0x2118
+PPU: NMI DISABLED IRQmode=0 (value=$1) scan=121 nmiFlag=0 alreadyFired=0
+[INFO] Auto-Joypad enabled ($4200 bit 0) - Controller data is automatically stored in $4218-$421F during VBlank.
+PPU: NMI ENABLED IRQmode=0 (value=$81) scan=240 nmiFlag=0 alreadyFired=0
+=== BG Register State (frame 81) ===
+  Mode=0 TM=$3
+  BG1: MapAddr=0xc000 TileAddr=0x0 MapSize=1 TileSize=8x8 Scroll=(0,0)
+  BG2: MapAddr=0xe000 TileAddr=0x0 MapSize=0 TileSize=8x8 Scroll=(0,0)
+  BG3: MapAddr=0xc000 TileAddr=0x0 MapSize=1 TileSize=8x8 Scroll=(0,0)
+  BG4: MapAddr=0xc000 TileAddr=0x0 MapSize=1 TileSize=8x8 Scroll=(0,0)
+===================
+NMI triggered! #1 scan=240 frame=82 -> vector=0xb138
+  DMA Ch0: CPU->PPU Mode=0 Size=544 Src=0x1000 Dst=0x2104
+  DMA Ch7: CPU->PPU Mode=1 Size=2048 Src=0x7f0000 Dst=0x2118
+PPU: NMI DISABLED IRQmode=0 (value=$1) scan=257 nmiFlag=0 alreadyFired=1
+PPU: NMI ENABLED IRQmode=0 (value=$81) scan=257 nmiFlag=0 alreadyFired=1
+NMI triggered! #2 scan=240 frame=84 -> vector=0xb138
+  DMA Ch0: CPU->PPU Mode=0 Size=544 Src=0x1000 Dst=0x2104
+  DMA Ch7: CPU->PPU Mode=1 Size=2048 Src=0x7f0000 Dst=0x2118
+PPU: NMI DISABLED IRQmode=0 (value=$1) scan=257 nmiFlag=0 alreadyFired=1
+PPU: NMI ENABLED IRQmode=0 (value=$81) scan=257 nmiFlag=0 alreadyFired=1
+NMI triggered! #3 scan=240 frame=86 -> vector=0xb138
+  DMA Ch0: CPU->PPU Mode=0 Size=544 Src=0x1000 Dst=0x2104
+  DMA Ch7: CPU->PPU Mode=1 Size=2048 Src=0x7f0000 Dst=0x2118
+PPU: NMI DISABLED IRQmode=0 (value=$1) scan=257 nmiFlag=0 alreadyFired=1
+PPU: NMI ENABLED IRQmode=0 (value=$81) scan=257 nmiFlag=0 alreadyFired=1
+NMI triggered! #4 scan=240 frame=88 -> vector=0xb138
+  DMA Ch0: CPU->PPU Mode=0 Size=544 Src=0x1000 Dst=0x2104
+  DMA Ch7: CPU->PPU Mode=1 Size=2048 Src=0x7f0000 Dst=0x2118
+PPU: NMI DISABLED IRQmode=0 (value=$1) scan=257 nmiFlag=0 alreadyFired=1
+PPU: NMI ENABLED IRQmode=0 (value=$81) scan=257 nmiFlag=0 alreadyFired=1
+NMI triggered! #5 scan=240 frame=90 -> vector=0xb138
+  DMA Ch0: CPU->PPU Mode=0 Size=544 Src=0x1000 Dst=0x2104
+  DMA Ch7: CPU->PPU Mode=1 Size=2048 Src=0x7f0000 Dst=0x2118
+PPU: NMI DISABLED IRQmode=0 (value=$1) scan=257 nmiFlag=0 alreadyFired=1
+PPU: NMI ENABLED IRQmode=0 (value=$81) scan=257 nmiFlag=0 alreadyFired=1
+NMI triggered! #6 scan=240 frame=92 -> vector=0xb138
+  DMA Ch0: CPU->PPU Mode=0 Size=544 Src=0x1000 Dst=0x2104
+  DMA Ch7: CPU->PPU Mode=1 Size=2048 Src=0x7f0000 Dst=0x2118
+PPU: NMI DISABLED IRQmode=0 (value=$1) scan=257 nmiFlag=0 alreadyFired=1
+PPU: NMI ENABLED IRQmode=0 (value=$81) scan=257 nmiFlag=0 alreadyFired=1
+NMI triggered! #7 scan=240 frame=94 -> vector=0xb138
+  DMA Ch0: CPU->PPU Mode=0 Size=544 Src=0x1000 Dst=0x2104
+  DMA Ch7: CPU->PPU Mode=1 Size=2048 Src=0x7f0000 Dst=0x2118
+PPU: NMI DISABLED IRQmode=0 (value=$1) scan=257 nmiFlag=0 alreadyFired=1
+PPU: NMI ENABLED IRQmode=0 (value=$81) scan=257 nmiFlag=0 alreadyFired=1
+NMI triggered! #8 scan=240 frame=96 -> vector=0xb138
+  DMA Ch0: CPU->PPU Mode=0 Size=544 Src=0x1000 Dst=0x2104
+  DMA Ch7: CPU->PPU Mode=1 Size=2048 Src=0x7f0000 Dst=0x2118
+PPU: NMI DISABLED IRQmode=0 (value=$1) scan=257 nmiFlag=0 alreadyFired=1
+PPU: NMI ENABLED IRQmode=0 (value=$81) scan=257 nmiFlag=0 alreadyFired=1
+NMI triggered! #9 scan=240 frame=98 -> vector=0xb138
+PPU: NMI DISABLED IRQmode=0 (value=$1) scan=257 nmiFlag=0 alreadyFired=1
+NMI triggered! #10 scan=240 frame=100 -> vector=0xb138
+NMI triggered! #11 scan=240 frame=102 -> vector=0xb138
+NMI triggered! #12 scan=240 frame=104 -> vector=0xb138
+NMI triggered! #13 scan=240 frame=106 -> vector=0xb138
+NMI triggered! #14 scan=240 frame=108 -> vector=0xb138
+NMI triggered! #15 scan=240 frame=110 -> vector=0xb138
+NMI triggered! #16 scan=240 frame=112 -> vector=0xb138
+NMI triggered! #17 scan=240 frame=114 -> vector=0xb138
+NMI triggered! #18 scan=240 frame=116 -> vector=0xb138
+NMI triggered! #19 scan=240 frame=118 -> vector=0xb138
+NMI triggered! #20 scan=240 frame=120 -> vector=0xb138
+[JOYPAD] joy1=0x1000
+[JOYPAD] joy1=0x1000
+PPU: Rendered frame 300
+PPU: Rendered frame 600
+PPU: VRAM hex dump saved to vram_f675.txt
+
+PPU: Key VRAM regions analysis:
+========================================
+BG1 Tilemap (0x0000-0x07FF, 2048 bytes):
+  Non-zero bytes: 1699 / 2048
+  Non-zero tilemap entries: 1024 / 1024
+  Status: HAS DATA
+
+BG1 Tiles at 0x4000 (2bpp, 16 bytes/tile):
+  Non-zero bytes: 8192 / 16384
+  Tiles with data: 1024 / 1024
+  Status: HAS DATA
+
+BG1 Tiles at 0x8000 (2bpp, 16 bytes/tile):
+  Non-zero bytes: 8228 / 16384
+  Tiles with data: 1024 / 1024
+  Status: HAS DATA
+
+Overall VRAM statistics:
+  Total non-zero bytes: 37195 / 65536 (56%)
+========================================
+
+PPU: VRAM hex dump saved to vram_f685.txt
+
+PPU: Key VRAM regions analysis:
+========================================
+BG1 Tilemap (0x0000-0x07FF, 2048 bytes):
+  Non-zero bytes: 1699 / 2048
+  Non-zero tilemap entries: 1024 / 1024
+  Status: HAS DATA
+
+BG1 Tiles at 0x4000 (2bpp, 16 bytes/tile):
+  Non-zero bytes: 8192 / 16384
+  Tiles with data: 1024 / 1024
+  Status: HAS DATA
+
+BG1 Tiles at 0x8000 (2bpp, 16 bytes/tile):
+  Non-zero bytes: 8228 / 16384
+  Tiles with data: 1024 / 1024
+  Status: HAS DATA
+
+Overall VRAM statistics:
+  Total non-zero bytes: 37195 / 65536 (56%)
+========================================
+
+PPU: CGRAM dump saved to cgram_chartest.txt
+PPU: Rendered frame 900
+PPU: Unimplemented write to $2134 = $0
+[JOYPAD] joy1=0x2000
+PPU: Rendered frame 1200
+[JOYPAD] joy1=0x2000
+[JOYPAD] joy1=0x2000
+[JOYPAD] joy1=0x1000
+[JOYPAD] joy1=0x1000
+PPU: Rendered frame 1500
+PPU: Rendered frame 1800
+PPU: Rendered frame 2100
+PPU: Rendered frame 2400
+PPU: Rendered frame 2700
+PPU: Rendered frame 3000
+[JOYPAD] joy1=0x2000
+[JOYPAD] joy1=0x2000
+[JOYPAD] joy1=0x2000
+[JOYPAD] joy1=0x2000
+PPU: Rendered frame 3300
+[JOYPAD] joy1=0x2000
+[JOYPAD] joy1=0x2000
+[JOYPAD] joy1=0x2000
+[JOYPAD] joy1=0x2000
+[JOYPAD] joy1=0x1000
+[JOYPAD] joy1=0x1000
+PPU: Rendered frame 3600
+PPU: Rendered frame 3900
+PPU: Rendered frame 4200
+PPU: Rendered frame 4500
+PPU: Rendered frame 4800
+PPU: Rendered frame 5100
+PPU: Rendered frame 5400
+PPU: Rendered frame 5700
+PPU: Rendered frame 6000
+PPU: Rendered frame 6300
+PPU: Rendered frame 6600
+PPU: Rendered frame 6900
+PPU: Rendered frame 7200
+PPU: Rendered frame 7500
+PPU: Rendered frame 7800
+PPU: Rendered frame 8100
+PPU: Rendered frame 8400
+PPU: Rendered frame 8700
+PPU: Rendered frame 9000
+PPU: Rendered frame 9300
+PPU: Rendered frame 9600
+PPU: Rendered frame 9900
+PPU: Rendered frame 10200
+PPU: Rendered frame 10500
