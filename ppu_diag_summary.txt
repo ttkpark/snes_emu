@@ -9943,3 +9943,309 @@
     pal5: 0000 03E0 03E0 03E0 0000 7FE0 7FE0 7FE0 0000 03FF 03FF 03FF 0000 FFFF FFFF FFFF
     pal6: 0000 0000 0000 0000 0000 7C00 7C00 7C00 0000 001F 001F 001F 0000 7C1F 7C1F 7C1F
     pal7: 0000 03E0 03E0 03E0 0000 7FE0 7FE0 7FE0 0000 03FF 03FF 03FF 0000 FFFF FFFF FFFF
+=== Frame 60 ===
+  Mode=0 BGmode=0 INIDISP=forceON bright=15
+  TM=$01 TS=$00
+  BG1: MapAddr(byte)=0x0000 TileAddr(byte)=0x8000 MapSize=0 TileSz=8x8
+  BG2: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  BG3: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  BG4: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  CGRAM[0..7] bytes: 00 00 FF FF 00 00 00 00 00 00 00 00 00 00 00 00
+  CGRAM[0] color word = 0x0000 (R=0 G=0 B=0)
+  BG1 tilemap @0x0000 first row (32 tiles) parsed:
+    [ 0] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 1] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 2] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 3] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 4] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 5] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 6] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 7] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 8] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 9] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [10] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [11] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [12] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [13] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [14] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [15] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [16] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [17] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [18] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [19] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [20] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [21] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [22] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [23] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [24] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [25] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [26] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [27] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [28] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [29] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [30] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [31] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+  CGRAM palettes 0..7 (first 16 entries each):
+    pal0: 0000 FFFF 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal1: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal2: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal3: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal4: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal5: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal6: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal7: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+=== Frame 120 ===
+  Mode=0 BGmode=0 INIDISP=forceON bright=15
+  TM=$01 TS=$00
+  BG1: MapAddr(byte)=0x0000 TileAddr(byte)=0x8000 MapSize=0 TileSz=8x8
+  BG2: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  BG3: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  BG4: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  CGRAM[0..7] bytes: 00 00 FF FF 00 00 00 00 00 00 00 00 00 00 00 00
+  CGRAM[0] color word = 0x0000 (R=0 G=0 B=0)
+  BG1 tilemap @0x0000 first row (32 tiles) parsed:
+    [ 0] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 1] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 2] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 3] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 4] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 5] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 6] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 7] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 8] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 9] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [10] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [11] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [12] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [13] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [14] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [15] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [16] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [17] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [18] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [19] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [20] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [21] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [22] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [23] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [24] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [25] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [26] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [27] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [28] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [29] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [30] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [31] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+  CGRAM palettes 0..7 (first 16 entries each):
+    pal0: 0000 FFFF 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal1: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal2: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal3: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal4: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal5: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal6: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal7: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+=== Frame 200 ===
+  Mode=0 BGmode=0 INIDISP=forceON bright=15
+  TM=$01 TS=$00
+  BG1: MapAddr(byte)=0x0000 TileAddr(byte)=0x8000 MapSize=0 TileSz=8x8
+  BG2: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  BG3: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  BG4: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  CGRAM[0..7] bytes: 00 00 FF FF 00 00 00 00 00 00 00 00 00 00 00 00
+  CGRAM[0] color word = 0x0000 (R=0 G=0 B=0)
+  BG1 tilemap @0x0000 first row (32 tiles) parsed:
+    [ 0] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 1] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 2] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 3] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 4] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 5] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 6] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 7] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 8] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 9] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [10] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [11] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [12] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [13] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [14] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [15] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [16] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [17] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [18] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [19] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [20] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [21] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [22] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [23] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [24] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [25] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [26] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [27] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [28] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [29] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [30] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [31] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+  CGRAM palettes 0..7 (first 16 entries each):
+    pal0: 0000 FFFF 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal1: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal2: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal3: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal4: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal5: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal6: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal7: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+=== Frame 300 ===
+  Mode=0 BGmode=0 INIDISP=forceON bright=15
+  TM=$01 TS=$00
+  BG1: MapAddr(byte)=0x0000 TileAddr(byte)=0x8000 MapSize=0 TileSz=8x8
+  BG2: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  BG3: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  BG4: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  CGRAM[0..7] bytes: 00 00 FF FF 00 00 00 00 00 00 00 00 00 00 00 00
+  CGRAM[0] color word = 0x0000 (R=0 G=0 B=0)
+  BG1 tilemap @0x0000 first row (32 tiles) parsed:
+    [ 0] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 1] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 2] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 3] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 4] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 5] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 6] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 7] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 8] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 9] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [10] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [11] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [12] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [13] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [14] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [15] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [16] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [17] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [18] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [19] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [20] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [21] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [22] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [23] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [24] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [25] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [26] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [27] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [28] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [29] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [30] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [31] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+  CGRAM palettes 0..7 (first 16 entries each):
+    pal0: 0000 FFFF 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal1: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal2: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal3: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal4: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal5: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal6: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal7: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+=== Frame 450 ===
+  Mode=0 BGmode=0 INIDISP=forceON bright=15
+  TM=$01 TS=$00
+  BG1: MapAddr(byte)=0x0000 TileAddr(byte)=0x8000 MapSize=0 TileSz=8x8
+  BG2: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  BG3: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  BG4: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  CGRAM[0..7] bytes: 00 00 FF FF 00 00 00 00 00 00 00 00 00 00 00 00
+  CGRAM[0] color word = 0x0000 (R=0 G=0 B=0)
+  BG1 tilemap @0x0000 first row (32 tiles) parsed:
+    [ 0] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 1] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 2] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 3] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 4] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 5] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 6] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 7] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 8] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 9] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [10] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [11] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [12] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [13] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [14] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [15] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [16] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [17] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [18] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [19] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [20] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [21] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [22] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [23] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [24] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [25] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [26] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [27] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [28] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [29] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [30] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [31] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+  CGRAM palettes 0..7 (first 16 entries each):
+    pal0: 0000 FFFF 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal1: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal2: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal3: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal4: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal5: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal6: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal7: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+=== Frame 600 ===
+  Mode=0 BGmode=0 INIDISP=forceON bright=15
+  TM=$01 TS=$00
+  BG1: MapAddr(byte)=0x0000 TileAddr(byte)=0x8000 MapSize=0 TileSz=8x8
+  BG2: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  BG3: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  BG4: MapAddr(byte)=0x0000 TileAddr(byte)=0x0000 MapSize=0 TileSz=8x8
+  CGRAM[0..7] bytes: 00 00 FF FF 00 00 00 00 00 00 00 00 00 00 00 00
+  CGRAM[0] color word = 0x0000 (R=0 G=0 B=0)
+  BG1 tilemap @0x0000 first row (32 tiles) parsed:
+    [ 0] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 1] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 2] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 3] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 4] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 5] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 6] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 7] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 8] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [ 9] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [10] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [11] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [12] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [13] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [14] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [15] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [16] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [17] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [18] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [19] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [20] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [21] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [22] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [23] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [24] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [25] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [26] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [27] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [28] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [29] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [30] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+    [31] 0x0000 -> tile=  0 pal=0 pri=0 h=0 v=0
+  CGRAM palettes 0..7 (first 16 entries each):
+    pal0: 0000 FFFF 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal1: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal2: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal3: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal4: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal5: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal6: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000
+    pal7: 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000

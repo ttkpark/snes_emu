@@ -1021,15 +1021,14 @@ int main(int argc, char* argv[]) {
             }
 
             // Save BMP snapshot at specific frames for visual diff against Snes9x reference
-            // Simplified condition: capture key frames + entire Color Test range (1800-2100)
+            // Dense capture between 2100-3000 to find princess test
             bool shouldCapture = (frameCount >= 1800 && frameCount <= 2100) ||
+                (frameCount >= 2100 && frameCount <= 3000 && frameCount % 50 == 0) ||
                 frameCount == 30 || frameCount == 60 || frameCount == 120 ||
                 frameCount == 180 || frameCount == 300 || frameCount == 450 ||
                 frameCount == 540 || frameCount == 580 || frameCount == 600 ||
                 frameCount == 900 || frameCount == 1000 ||
-                frameCount == 2200 || frameCount == 2500 || frameCount == 3000 ||
-                frameCount == 3500 || frameCount == 4000 || frameCount == 4500 ||
-                frameCount == 5000;
+                frameCount == 3500 || frameCount == 4000 || frameCount == 4500 || frameCount == 5000;
             if (shouldCapture) {
                 const uint32_t W = PPU::SCREEN_WIDTH, H = PPU::SCREEN_HEIGHT;
                 uint32_t rowBytes = ((W * 3 + 3) & ~3u);
