@@ -252,13 +252,13 @@ void PPU::renderFrame() {
         SDL_UnlockTexture(m_texture);
     }
 
-    SDL_RenderClear(m_renderer); 
+    SDL_RenderClear(m_renderer);
     SDL_RenderCopy(m_renderer, m_texture, NULL, NULL);
     SDL_RenderPresent(m_renderer);
     #endif
 
     frameCount++;
-    if (frameCount % 300 == 0) {  // Only log every 5 seconds (300 frames at 60fps)
+    if (frameCount % 300 == 0) {
         std::cout << "PPU: Rendered frame " << frameCount << std::endl;
     }
 }
