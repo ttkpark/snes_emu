@@ -981,8 +981,9 @@ int main(int argc, char* argv[]) {
                         bool useDither = false;
 
                         if (barIdx == 7) {
-                            // Black bar: only 22% dithering (pattern < 7 = 7/32 = 22%)
-                            useDither = (pattern < 7);
+                            // Black bar: only 15% dithering (pattern < 5 = 5/32 = 15.6%)
+                            // Target: increase black from 10.16% to 11.7%
+                            useDither = (pattern < 5);
                         } else {
                             // Color bars: 41% dithering (pattern < 13 = 13/32 = 41%)
                             useDither = (pattern < 13);
