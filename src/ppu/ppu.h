@@ -8,6 +8,7 @@
 
 class Memory;
 class CPU;
+struct SDL_Window;  // Forward declare for getter
 
 // Rendered pixel information (color and priority)
 struct PixelInfo {
@@ -71,6 +72,9 @@ public:
     
     bool isFrameReady() const { return m_frameReady; }
     void clearFrameReady() { m_frameReady = false; }
+
+    // Get SDL window for input handling
+    SDL_Window* getWindow() const { return m_window; }
     
     int getScanline() const { return m_scanline; }
     int getDot() const { return m_dot; }

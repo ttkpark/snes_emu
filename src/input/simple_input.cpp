@@ -22,7 +22,7 @@ void SimpleInput::handleEvent(const SDL_Event& event) {
     if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
         bool pressed = (event.type == SDL_KEYDOWN);
         SDL_Scancode scancode = event.key.keysym.scancode;
-        
+
         // Key mapping: Q=SELECT, E=START, Arrow keys=UDLR
         // Z=B, X=A, A=Y, S=X, D=L, F=R
         const char* buttonName = nullptr;
@@ -39,11 +39,14 @@ void SimpleInput::handleEvent(const SDL_Event& event) {
             case SDL_SCANCODE_F:     setButton(BIT_R, pressed); buttonName = "R"; break;
             case SDL_SCANCODE_Q:     setButton(BIT_SELECT, pressed); buttonName = "SELECT"; break;
             case SDL_SCANCODE_E:     setButton(BIT_START, pressed); buttonName = "START"; break;
-            default: break;
+            default:
+                std::cerr << "[INPUT_UNKNOWN] Scancode: " << scancode << " (not mapped)\n";
+                break;
         }
-        
+
         if (buttonName) {
             std::cout << "[INPUT] Button " << buttonName << " " << (pressed ? "PRESSED" : "RELEASED") << std::endl;
+            std::cerr << "[INPUT_MAPPED] " << buttonName << " " << (pressed ? "PRESS" : "RELEASE") << " (scancode=" << scancode << ")\n";
         }
     }
 }
@@ -99,4 +102,6 @@ void SimpleInput::setButton(ButtonBit bit, bool pressed) {
     } else {
         m_controller1_state &= ~(1 << bit);
     }
+    std::cerr << "[SET_BTN] bit=" << (int)bit << " pressed=" << pressed
+              << " state=0x" << std::hex << m_controller1_state << std::dec << "\n";
 }

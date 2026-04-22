@@ -1,0 +1,554 @@
+{
+  "timestamp": "2026-04-22T16:37:51.325350",
+  "total_steps": 79,
+  "tests": {
+    "Electronics Test": {
+      "step_count": 1,
+      "button_inputs": 1,
+      "auto_steps": 0,
+      "steps": [
+        {
+          "number": 1,
+          "timestamp": "2026-04-21 181858",
+          "button_input": [
+            "space"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181858_ST.png"
+        }
+      ]
+    },
+    "Character Test": {
+      "step_count": 12,
+      "button_inputs": 1,
+      "auto_steps": 11,
+      "steps": [
+        {
+          "number": 1,
+          "timestamp": "2026-04-21 181910",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181910.png"
+        },
+        {
+          "number": 2,
+          "timestamp": "2026-04-21 181916",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181916.png"
+        },
+        {
+          "number": 3,
+          "timestamp": "2026-04-21 181923",
+          "button_input": [
+            "return",
+            "space"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181923_SL_ST.png"
+        },
+        {
+          "number": 4,
+          "timestamp": "2026-04-21 181926",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181926.png"
+        },
+        {
+          "number": 5,
+          "timestamp": "2026-04-21 181929",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181929.png"
+        },
+        {
+          "number": 6,
+          "timestamp": "2026-04-21 181931",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181931.png"
+        },
+        {
+          "number": 7,
+          "timestamp": "2026-04-21 181934",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181934.png"
+        },
+        {
+          "number": 8,
+          "timestamp": "2026-04-21 181937",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181937.png"
+        },
+        {
+          "number": 9,
+          "timestamp": "2026-04-21 181939",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181939.png"
+        },
+        {
+          "number": 10,
+          "timestamp": "2026-04-21 181942",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181942.png"
+        },
+        {
+          "number": 11,
+          "timestamp": "2026-04-21 181944",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181944.png"
+        },
+        {
+          "number": 12,
+          "timestamp": "2026-04-21 181947",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181947.png"
+        }
+      ]
+    },
+    "Controller Test": {
+      "step_count": 58,
+      "button_inputs": 9,
+      "auto_steps": 49,
+      "steps": [
+        {
+          "number": 1,
+          "timestamp": "2026-04-21 181950",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181950.png"
+        },
+        {
+          "number": 2,
+          "timestamp": "2026-04-21 181953",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181953.png"
+        },
+        {
+          "number": 3,
+          "timestamp": "2026-04-21 181956",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181956.png"
+        },
+        {
+          "number": 4,
+          "timestamp": "2026-04-21 181959",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 181959.png"
+        },
+        {
+          "number": 5,
+          "timestamp": "2026-04-21 182002",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182002.png"
+        },
+        {
+          "number": 6,
+          "timestamp": "2026-04-21 182004",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182004.png"
+        },
+        {
+          "number": 7,
+          "timestamp": "2026-04-21 182006",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182006.png"
+        },
+        {
+          "number": 8,
+          "timestamp": "2026-04-21 182009",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182009.png"
+        },
+        {
+          "number": 9,
+          "timestamp": "2026-04-21 182012",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182012.png"
+        },
+        {
+          "number": 10,
+          "timestamp": "2026-04-21 182015",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182015.png"
+        },
+        {
+          "number": 11,
+          "timestamp": "2026-04-21 182018",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182018.png"
+        },
+        {
+          "number": 12,
+          "timestamp": "2026-04-21 182020",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182020.png"
+        },
+        {
+          "number": 13,
+          "timestamp": "2026-04-21 182022",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182022.png"
+        },
+        {
+          "number": 14,
+          "timestamp": "2026-04-21 182024",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182024.png"
+        },
+        {
+          "number": 15,
+          "timestamp": "2026-04-21 182026",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182026.png"
+        },
+        {
+          "number": 16,
+          "timestamp": "2026-04-21 182028",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182028.png"
+        },
+        {
+          "number": 17,
+          "timestamp": "2026-04-21 182033",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182033.png"
+        },
+        {
+          "number": 18,
+          "timestamp": "2026-04-21 182036",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182036.png"
+        },
+        {
+          "number": 19,
+          "timestamp": "2026-04-21 182038",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182038.png"
+        },
+        {
+          "number": 20,
+          "timestamp": "2026-04-21 182041",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182041.png"
+        },
+        {
+          "number": 21,
+          "timestamp": "2026-04-21 182044",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182044.png"
+        },
+        {
+          "number": 22,
+          "timestamp": "2026-04-21 182047",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182047.png"
+        },
+        {
+          "number": 23,
+          "timestamp": "2026-04-21 182050",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182050.png"
+        },
+        {
+          "number": 24,
+          "timestamp": "2026-04-21 182053",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182053.png"
+        },
+        {
+          "number": 25,
+          "timestamp": "2026-04-21 182055",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182055.png"
+        },
+        {
+          "number": 26,
+          "timestamp": "2026-04-21 182058",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182058.png"
+        },
+        {
+          "number": 27,
+          "timestamp": "2026-04-21 182100",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182100.png"
+        },
+        {
+          "number": 28,
+          "timestamp": "2026-04-21 182102",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182102.png"
+        },
+        {
+          "number": 29,
+          "timestamp": "2026-04-21 182106",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182106.png"
+        },
+        {
+          "number": 30,
+          "timestamp": "2026-04-21 182111",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182111.png"
+        },
+        {
+          "number": 31,
+          "timestamp": "2026-04-21 182113",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182113.png"
+        },
+        {
+          "number": 32,
+          "timestamp": "2026-04-21 182116",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182116.png"
+        },
+        {
+          "number": 33,
+          "timestamp": "2026-04-21 182120",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182120.png"
+        },
+        {
+          "number": 34,
+          "timestamp": "2026-04-21 182122",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182122.png"
+        },
+        {
+          "number": 35,
+          "timestamp": "2026-04-21 182125",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182125.png"
+        },
+        {
+          "number": 36,
+          "timestamp": "2026-04-21 182127",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182127.png"
+        },
+        {
+          "number": 37,
+          "timestamp": "2026-04-21 182129",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182129.png"
+        },
+        {
+          "number": 38,
+          "timestamp": "2026-04-21 182131",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182131.png"
+        },
+        {
+          "number": 39,
+          "timestamp": "2026-04-21 182134",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182134.png"
+        },
+        {
+          "number": 40,
+          "timestamp": "2026-04-21 182136",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182136.png"
+        },
+        {
+          "number": 41,
+          "timestamp": "2026-04-21 182139",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182139.png"
+        },
+        {
+          "number": 42,
+          "timestamp": "2026-04-21 182142",
+          "button_input": [
+            "return",
+            "return"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182142_SL_SL.png"
+        },
+        {
+          "number": 43,
+          "timestamp": "2026-04-21 182146",
+          "button_input": [
+            "space"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182146_ST.png"
+        },
+        {
+          "number": 44,
+          "timestamp": "2026-04-21 182150",
+          "button_input": [
+            "w"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182150_U.png"
+        },
+        {
+          "number": 45,
+          "timestamp": "2026-04-21 182155",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182155.png"
+        },
+        {
+          "number": 46,
+          "timestamp": "2026-04-21 182157",
+          "button_input": [
+            "a",
+            "w"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182157_LU.png"
+        },
+        {
+          "number": 47,
+          "timestamp": "2026-04-21 182204",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182204.png"
+        },
+        {
+          "number": 48,
+          "timestamp": "2026-04-21 182207",
+          "button_input": [
+            "a",
+            "s",
+            "d",
+            "s",
+            "return",
+            "space",
+            "c"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182207_LD_DR_SL_ST_X.png"
+        },
+        {
+          "number": 49,
+          "timestamp": "2026-04-21 182220",
+          "button_input": [
+            "v",
+            "z"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182220_Y_A.png"
+        },
+        {
+          "number": 50,
+          "timestamp": "2026-04-21 182223",
+          "button_input": [
+            "x"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182223_B.png"
+        },
+        {
+          "number": 51,
+          "timestamp": "2026-04-21 182229",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182229.png"
+        },
+        {
+          "number": 52,
+          "timestamp": "2026-04-21 182231",
+          "button_input": [
+            "z"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182231_A_Left.png"
+        },
+        {
+          "number": 53,
+          "timestamp": "2026-04-21 182235",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182235.png"
+        },
+        {
+          "number": 54,
+          "timestamp": "2026-04-21 182240",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182240.png"
+        },
+        {
+          "number": 55,
+          "timestamp": "2026-04-21 182243",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182243_Right.png"
+        },
+        {
+          "number": 56,
+          "timestamp": "2026-04-21 182246",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182246.png"
+        },
+        {
+          "number": 57,
+          "timestamp": "2026-04-21 182249",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182249.png"
+        },
+        {
+          "number": 58,
+          "timestamp": "2026-04-21 182300",
+          "button_input": [
+            "return",
+            "return",
+            "return"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182300_SL_SL_SL.png"
+        }
+      ]
+    },
+    "Sound Test": {
+      "step_count": 8,
+      "button_inputs": 6,
+      "auto_steps": 2,
+      "steps": [
+        {
+          "number": 1,
+          "timestamp": "2026-04-21 182342",
+          "button_input": [
+            "space"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182342_ST.png"
+        },
+        {
+          "number": 2,
+          "timestamp": "2026-04-21 182344",
+          "button_input": [
+            "x"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182344_B.png"
+        },
+        {
+          "number": 3,
+          "timestamp": "2026-04-21 182348",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182348.png"
+        },
+        {
+          "number": 4,
+          "timestamp": "2026-04-21 182353",
+          "button_input": [
+            "return"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182353_SL.png"
+        },
+        {
+          "number": 5,
+          "timestamp": "2026-04-21 182652",
+          "button_input": [
+            "z"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182652_A.png"
+        },
+        {
+          "number": 6,
+          "timestamp": "2026-04-21 182657",
+          "button_input": [
+            "return"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182657_SL.png"
+        },
+        {
+          "number": 7,
+          "timestamp": "2026-04-21 182749",
+          "button_input": [
+            "return"
+          ],
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182749_SL.png"
+        },
+        {
+          "number": 8,
+          "timestamp": "2026-04-21 182753",
+          "button_input": null,
+          "screenshot": "½ºÅ©¸°¼¦ 2026-04-21 182753.png"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "timestamp": "2026-04-23T01:37:55.804391",
+  "frames_count": 14,
+  "test_result": "PASS",
+  "validation": {
+    "passed": true,
+    "has_boot": true,
+    "has_ready": true,
+    "has_running": true
+  },
+  "sample_frames": {
+    "30": {
+      "colors": 1,
+      "verdict": "BOOT_OK"
+    },
+    "60": {
+      "colors": 7,
+      "verdict": "READY"
+    },
+    "85": {
+      "colors": 7,
+      "verdict": "INPUT_SENT"
+    },
+    "90": {
+      "colors": 7,
+      "verdict": "RUNNING"
+    },
+    "95": {
+      "colors": 7,
+      "verdict": "RUNNING"
+    }
+  }
+}

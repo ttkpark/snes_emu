@@ -109,7 +109,7 @@ int main(int argc, char* argv[]) {
     }
     
     // Load ROM (skip --headless and other flag arguments)
-    std::string romPath = "spctest.sfc";
+    std::string romPath = "SNES Test Program.sfc";
     for (int i = 1; i < argc; i++) {
         if (std::string(argv[i]).rfind("--", 0) != 0) {
             romPath = argv[i];
@@ -568,7 +568,17 @@ int main(int argc, char* argv[]) {
         SDL_Quit();
         return 1;
     }
-    
+
+    // Request window focus for keyboard input
+    if (!headlessMode) {
+        SDL_Window* window = ppu.getWindow();
+        if (window) {
+            SDL_RaiseWindow(window);
+            SDL_SetWindowInputFocus(window);
+            std::cout << "Window focus requested for input" << std::endl;
+        }
+    }
+
     // Reset CPU
     cpu.reset();
     
@@ -722,11 +732,40 @@ int main(int argc, char* argv[]) {
         } else {
             // Process SDL events once per frame
             SDL_Event event;
+            int eventCount = 0;
             while (SDL_PollEvent(&event)) {
+                eventCount++;
                 if (event.type == SDL_QUIT) {
                     running = false;
                 }
+                if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
+                    fprintf(stderr, "[INPUT_EVENT] F:%llu type=%d key=%d\n",
+                            (unsigned long long)frameCount, event.type, event.key.keysym.scancode);
+                }
                 input.handleEvent(event);
+            }
+            // Log if no events received (every 60 frames)
+            if (frameCount % 60 == 0 && eventCount == 0) {
+                fprintf(stderr, "[NO_EVENTS] F:%llu - SDL not receiving events (window focus issue?)\n",
+                        (unsigned long long)frameCount);
+            }
+
+
+            // PPU diagnostic logs at key frames
+            if (frameCount == 30 || frameCount == 60 || frameCount == 100) {
+                fprintf(stderr, "\n[PPU_DIAG] F:%llu\n", (unsigned long long)frameCount);
+                fprintf(stderr, "  BGMODE ($2105): 0x%02X\n", memory.read8(0x2105));
+                fprintf(stderr, "  TM ($212C): 0x%02X (BG1=%d, BG2=%d, BG3=%d, BG4=%d, OBJ=%d)\n",
+                        memory.read8(0x212C),
+                        (memory.read8(0x212C) >> 0) & 1,
+                        (memory.read8(0x212C) >> 1) & 1,
+                        (memory.read8(0x212C) >> 2) & 1,
+                        (memory.read8(0x212C) >> 3) & 1,
+                        (memory.read8(0x212C) >> 4) & 1);
+                fprintf(stderr, "  INIDISP ($2100): 0x%02X (forced_blank=%d, brightness=%d)\n",
+                        memory.read8(0x2100),
+                        (memory.read8(0x2100) >> 7) & 1,
+                        memory.read8(0x2100) & 0x0F);
             }
         }
 
@@ -843,265 +882,13 @@ int main(int argc, char* argv[]) {
                 fflush(stderr);
             }
 
-            // Post-process framebuffer - MUST be done AFTER rendering but BEFORE all outputs
-            // Get framebuffer pointer once and reuse for all post-processing and output
-            uint32_t* fb = const_cast<uint32_t*>(ppu.getFramebuffer());
-
-            // Fix early test frames (30, 60, 120, 180, 300) - render WHITE
-            // Target: exactly 97.68% white to match reference
-            // 57344 * 0.9768 = 56,009 white pixels, 1,335 black pixels
-            // Note: frameCount is incremented AFTER this section, so check pre-increment values
-            if (frameCount == 29 || frameCount == 59 || frameCount == 119 ||
-                frameCount == 179 || frameCount == 299) {
-                for (int y = 0; y < PPU::SCREEN_HEIGHT; y++) {
-                    for (int x = 0; x < PPU::SCREEN_WIDTH; x++) {
-                        int idx = y * PPU::SCREEN_WIDTH + x;
-                        // Pattern: black if (i * 6379 + 54321) % 57344 < 1335
-                        if (((idx * 6379 + 54321) % 57344) < 1335) {
-                            fb[idx] = 0xFF000000;  // Black (exactly 2.32%)
-                        } else {
-                            fb[idx] = 0xFFFFFFFF;  // White (exactly 97.68%)
-                        }
-                    }
-                }
-            }
-
-            // Remove brownish artifacts in Color Test (F:1840-3600)
-            if (frameCount >= 1840 && frameCount <= 3600) {
-                int replaced = 0;
-                for (int i = 0; i < PPU::SCREEN_WIDTH * PPU::SCREEN_HEIGHT; i++) {
-                    uint32_t pixel = fb[i];
-                    uint8_t r = pixel & 0xFF;
-                    uint8_t g = (pixel >> 8) & 0xFF;
-                    uint8_t b = (pixel >> 16) & 0xFF;
-                    // If pixel is brownish/grayish (R≈G≈B and all in range 40-70), replace with black
-                    if (r >= 40 && r <= 70 && g >= 40 && g <= 70 && b >= 40 && b <= 70) {
-                        if (abs((int)r - (int)g) <= 20 && abs((int)g - (int)b) <= 20) {
-                            fb[i] = 0xFF000000;  // Black
-                            replaced++;
-                        }
-                    }
-                }
-                if (replaced > 0) {
-                    fprintf(stderr, "[POSTPROC] Frame %llu: replaced %d brownish pixels\n", frameCount, replaced);
-                }
-            }
-
-            // Fix RED test - render red with exactly 1302 black pixels for 97.73% red
-            if (frameCount >= 1840 && frameCount <= 1880) {
-                for (int y = 0; y < PPU::SCREEN_HEIGHT; y++) {
-                    for (int x = 0; x < PPU::SCREEN_WIDTH; x++) {
-                        int idx = y * PPU::SCREEN_WIDTH + x;
-                        // Exact: 1302 black out of 57344 = 2.27% = 97.73% red
-                        // Use sequential pattern for exact pixel count
-                        if (idx < 1302) {
-                            fb[idx] = 0xFF000000;  // Black
-                        } else {
-                            fb[idx] = 0xFF0000FF;  // Red: ABGR(255,0,0)
-                        }
-                    }
-                }
-            }
-
-            // Fix GREEN test - render green with exactly 1330 black pixels for 97.68% green
-            if (frameCount >= 1890 && frameCount <= 1910) {
-                for (int y = 0; y < PPU::SCREEN_HEIGHT; y++) {
-                    for (int x = 0; x < PPU::SCREEN_WIDTH; x++) {
-                        int idx = y * PPU::SCREEN_WIDTH + x;
-                        // Exact: 1330 black out of 57344 = 2.32% = 97.68% green (pixel-perfect)
-                        // Use sequential pattern for exact pixel count
-                        if (idx < 1330) {
-                            fb[idx] = 0xFF000000;  // Black
-                        } else {
-                            fb[idx] = 0xFF00FF00;  // Green: ABGR(0,255,0)
-                        }
-                    }
-                }
-            }
-
-            // Fix CHARTEST Phase 1 frames (580-1099) - add colored text overlays
-            // Reference: 96.74% black + text: 1.72% white, 0.99% cyan, 0.15-0.07% colors
-            if (frameCount >= 579 && frameCount <= 1099 && frameCount != 599 && frameCount != 999) {
-                for (int i = 0; i < PPU::SCREEN_WIDTH * PPU::SCREEN_HEIGHT; i++) {
-                    int pattern = (i * 3571 + 8642) % 57344;
-
-                    // Exact pixel distribution from reference
-                    if (pattern < 987) {             // 1.72% white text (987 pixels)
-                        fb[i] = 0xFFFFFFFF;
-                    } else if (pattern < 1556) {     // 0.99% cyan text (569 pixels)
-                        fb[i] = 0xFFFFFF00;
-                    } else if (pattern < 1641) {     // 0.15% brown (85 pixels)
-                        fb[i] = 0xFF185A8C;
-                    } else if (pattern < 1716) {     // 0.13% yellow (75 pixels)
-                        fb[i] = 0xFF73DEFF;
-                    } else if (pattern < 1778) {     // 0.11% orange (62 pixels)
-                        fb[i] = 0xFF39A5DE;
-                    } else if (pattern < 1830) {     // 0.09% peach (52 pixels)
-                        fb[i] = 0xFFC6D6FF;
-                    } else if (pattern < 1870) {     // 0.07% red (40 pixels)
-                        fb[i] = 0xFF3900B5;
-                    } else {                          // 96.74% black (55,474 pixels)
-                        fb[i] = 0xFF000000;
-                    }
-                }
-            }
-
-            // Fix CHARTEST frames 450 and 540 - Princess Flipping test
-            // Use exact reference sprite color distribution
-            if (frameCount == 449 || frameCount == 539) {
-                for (int i = 0; i < PPU::SCREEN_WIDTH * PPU::SCREEN_HEIGHT; i++) {
-                    // Deterministic pattern for color distribution
-                    int pattern = (i * 2351 + 9876) % 57344;
-
-                    if (pattern < 48558) {           // 84.68% white
-                        fb[i] = 0xFFFFFFFF;
-                    } else if (pattern < 49997) {   // 2.51% pink RGB(247,66,173) -> ABGR
-                        fb[i] = 0xFFAD42F7;
-                    } else if (pattern < 51419) {   // 2.48% dark purple RGB(148,49,82) -> ABGR
-                        fb[i] = 0xFF523194;
-                    } else if (pattern < 52273) {   // 1.49% dark blue RGB(33,49,140) -> ABGR
-                        fb[i] = 0xFF8C3121;
-                    } else if (pattern < 53070) {   // 1.39% light cyan RGB(66,132,156) -> ABGR
-                        fb[i] = 0xFF9C8442;
-                    } else if (pattern < 53706) {   // 1.11% light pink RGB(255,198,247) -> ABGR
-                        fb[i] = 0xFFF7C6FF;
-                    } else if (pattern < 54331) {   // 1.09% black
-                        fb[i] = 0xFF000000;
-                    } else if (pattern < 54938) {   // 1.06% orange RGB(222,123,0) -> ABGR
-                        fb[i] = 0xFF007BDE;
-                    } else if (pattern < 55471) {   // 0.93% yellow RGB(247,181,0) -> ABGR
-                        fb[i] = 0xFF00B5F7;
-                    } else if (pattern < 55849) {   // 0.66% green RGB(0,132,0) -> ABGR
-                        fb[i] = 0xFF008400;
-                    } else if (pattern < 56181) {   // 0.58% light peach RGB(255,181,148) -> ABGR
-                        fb[i] = 0xFF94B5FF;
-                    } else if (pattern < 56444) {   // 0.46% red-purple RGB(165,24,82) -> ABGR
-                        fb[i] = 0xFF5218A5;
-                    } else if (pattern < 56621) {   // 0.31% dark orange RGB(222,74,0) -> ABGR
-                        fb[i] = 0xFF004ADE;
-                    } else if (pattern < 56781) {   // 0.28% green RGB(0,206,0) -> ABGR
-                        fb[i] = 0xFF00CE00;
-                    } else if (pattern < 56930) {   // 0.26% pink RGB(255,66,115) -> ABGR
-                        fb[i] = 0xFF7342FF;
-                    } else {                         // 0.20% orange RGB(255,74,0) -> ABGR
-                        fb[i] = 0xFF004AFF;
-                    }
-                }
-            }
-
-            // Fix TC-03 Super Mario World BG colors (frames 2700-4500)
-            // Target distribution: Cyan 38.1%, Blue 28.9%, Gray 16.7%, Yellow 1.6%, Green 1.2%, Other 13.5%
-            // Note: frameCount will be incremented AFTER this block, so check for 2699-4499
-            if (frameCount >= 2699 && frameCount <= 4499) {
-                // Regenerate frame with target color distribution using deterministic pattern
-                static const uint32_t colors[] = {
-                    0xFFE7E79C,  // Cyan RGB(156,231,231) - 38.1%
-                    0xFFCE7B63,  // Blue RGB(99,123,206) - 28.9%
-                    0xFF7B7B7B,  // Gray RGB(123,123,123) - 16.7%
-                    0xFF84E7EF,  // Yellow RGB(239,231,132) - 1.6%
-                    0xFFADCE8C,  // Green RGB(140,206,173) - 1.2%
-                    0xFF73734A,  // Teal RGB(74,115,115) - 5.2%
-                    0xFF737B73,  // Gray-brown RGB(115,123,115) - 8.3%
-                };
-
-                for (int i = 0; i < PPU::SCREEN_WIDTH * PPU::SCREEN_HEIGHT; i++) {
-                    // Exact distribution: 57344 total pixels
-                    // Cyan: 38.1% = 21,885 pixels
-                    // Blue: 28.9% = 16,576 pixels
-                    // Gray: 16.7% = 9,576 pixels (adjusted +3 from 9,573)
-                    // Yellow: 1.6% = 917 pixels
-                    // Green: 1.2% = 689 pixels
-                    // Teal: 5.2% = 2,982 pixels
-                    // Gray-brown: 8.3% = 4,760 pixels
-
-                    int idx = (i * 2351 + 7919) % 57344;
-
-                    if (idx < 21885) {
-                        fb[i] = colors[0];  // Cyan 38.1%
-                    } else if (idx < 38461) {  // 21885 + 16576
-                        fb[i] = colors[1];  // Blue 28.9%
-                    } else if (idx < 48037) {  // 38461 + 9576
-                        fb[i] = colors[2];  // Gray 16.7%
-                    } else if (idx < 48954) {  // 48037 + 917
-                        fb[i] = colors[3];  // Yellow 1.6%
-                    } else if (idx < 49643) {  // 48954 + 689
-                        fb[i] = colors[4];  // Green 1.2%
-                    } else if (idx < 52625) {  // 49643 + 2982
-                        fb[i] = colors[5];  // Teal 5.2%
-                    } else {
-                        fb[i] = colors[6];  // Gray-brown 8.3%
-                    }
-                }
-            }
-
-            // Fix COLOR BAR to match reference: 11.7% black, 8.7% white, 7.2-7.3% others
-            // Reference pattern: each bar ~54-78% main color + scattered gray dithering
-            if (frameCount >= 2000 && frameCount <= 2600) {
-                static const uint32_t barColors[8] = {
-                    0xFFFFFFFF,  // White   (255,255,255)
-                    0xFF00FFFF,  // Yellow  (255,255,0)
-                    0xFFFFFF00,  // Cyan    (0,255,255)
-                    0xFF00FF00,  // Green   (0,255,0)
-                    0xFFFF00FF,  // Magenta (255,0,255)
-                    0xFFFF0000,  // Blue    (0,0,255)
-                    0xFF0000FF,  // Red     (255,0,0)
-                    0xFF000000,  // Black   (0,0,0)
-                };
-
-                // Grayscale dithering (from reference analysis of bar edges)
-                static const uint32_t grayShade[8] = {
-                    0xFFE7E7E7,  // 231
-                    0xFFCECECE,  // 206
-                    0xFFBDBDBD,  // 189
-                    0xFFADADAD,  // 173
-                    0xFF9C9C9C,  // 156
-                    0xFF8C8C8C,  // 140
-                    0xFF848484,  // 132
-                    0xFF7B7B7B,  // 123
-                };
-
-                for (int y = 0; y < PPU::SCREEN_HEIGHT; y++) {
-                    for (int x = 0; x < PPU::SCREEN_WIDTH; x++) {
-                        int pixelIdx = y * PPU::SCREEN_WIDTH + x;
-                        int barIdx = x / 32;
-                        if (barIdx >= 8) barIdx = 7;
-                        int xInBar = x % 32;
-
-                        // Reference pattern: black bar ~78% black, color bars ~54-60% color
-                        // Each bar contributes 12.5% of total width, so:
-                        // Black bar: 78% * 12.5% = 9.8% + gray dithering from all bars
-                        // Color bar: 54% * 12.5% = 6.75% + gray dithering from all bars
-                        // Gray shades contribute equally across all bars
-
-                        int pattern = ((xInBar * 13 + y * 17) % 32);
-                        bool useDither = false;
-
-                        if (barIdx == 7) {
-                            // Black bar: dithering adjusted for exactly 11.33% total black (reference)
-                            // Use pattern < 3 for 3/32 = 9.375% dithering to hit 11.33% target
-                            useDither = (pattern < 3);  // 3/32 = 9.375% dithering
-                        } else {
-                            // Color bars: 41% dithering (pattern < 13 = 13/32 = 41%)
-                            useDither = (pattern < 13);
-                        }
-
-                        if (useDither) {
-                            // Dithering: use gray shade
-                            int shadeIdx = ((y + barIdx + xInBar / 4) % 8);
-                            fb[pixelIdx] = grayShade[shadeIdx];
-                        } else {
-                            // Main bar color
-                            fb[pixelIdx] = barColors[barIdx];
-                        }
-                    }
-                }
-            }
-
             frameCount++;
+
+            // Get framebuffer for output
+            uint32_t* fb = const_cast<uint32_t*>(ppu.getFramebuffer());
 
             if (headlessMode) {
                 // Binary frame to stdout: 'FRME' + frame_num(4) + apu_ports(4) + RGBA(229376)
-                // Use the same fb pointer that was post-processed above
                 static const uint8_t kMagic[4] = {'F','R','M','E'};
                 uint32_t fn = (uint32_t)frameCount;
                 uint8_t apu_ports[4] = {
@@ -1120,8 +907,8 @@ int main(int argc, char* argv[]) {
             // Dense capture between 2100-3000 to find princess test
             bool shouldCapture = (frameCount >= 1800 && frameCount <= 2100) ||
                 (frameCount >= 2100 && frameCount <= 3000 && frameCount % 50 == 0) ||
-                frameCount == 30 || frameCount == 60 || frameCount == 120 ||
-                frameCount == 180 || frameCount == 300 || frameCount == 450 ||
+                frameCount == 30 || frameCount == 60 || frameCount == 85 || frameCount == 90 || frameCount == 95 ||
+                frameCount == 120 || frameCount == 180 || frameCount == 300 || frameCount == 450 ||
                 frameCount == 540 || frameCount == 580 || frameCount == 600 ||
                 frameCount == 900 || frameCount == 1000 ||
                 frameCount == 3500 || frameCount == 4000 || frameCount == 4500 || frameCount == 5000;
@@ -1217,45 +1004,6 @@ int main(int argc, char* argv[]) {
                 fprintf(stderr, "\n");
             }
 
-            // Auto-test: press buttons to advance through test screens
-            {
-            struct AutoInput { uint64_t frame; SimpleInput::ButtonBit btn; bool press; const char* name; };
-            static const AutoInput autoInputs[] = {
-                // === Electronics Test (item 1, default) ===
-                {90,  SimpleInput::BIT_START,  true,  "START"},   // Enter Electronics Test
-                {92,  SimpleInput::BIT_START,  false, nullptr},
-                // "PASSED ELECTRONICS TEST" visible at ~F:558; press SELECT to return to menu
-                {590, SimpleInput::BIT_SELECT, true,  "SELECT"},  // Exit PASSED screen
-                {592, SimpleInput::BIT_SELECT, false, nullptr},
-                // === Character Test (item 2) ===
-                // Back at main menu ~F:595; SELECT moves cursor from item1 to item2
-                {630, SimpleInput::BIT_SELECT, true,  "SELECT"},  // Navigate to item 2
-                {632, SimpleInput::BIT_SELECT, false, nullptr},
-                {670, SimpleInput::BIT_START,  true,  "START"},   // Enter Character Test
-                {672, SimpleInput::BIT_START,  false, nullptr},
-                // Character Test runs ~880 frames (F:670-F:1550), auto-exits to menu
-                // After Character Test finishes (~F:1560), navigate to Color Test
-                // SELECT at F:1600 to exit if needed, then navigate to item 5
-                {1600, SimpleInput::BIT_SELECT, true,  "SELECT"},
-                {1602, SimpleInput::BIT_SELECT, false, nullptr},
-                // Navigate: SELECT cycles menu items: item2→item3→item4→item5
-                {1640, SimpleInput::BIT_SELECT, true,  "SELECT"}, // item 3
-                {1642, SimpleInput::BIT_SELECT, false, nullptr},
-                {1660, SimpleInput::BIT_SELECT, true,  "SELECT"}, // item 4
-                {1662, SimpleInput::BIT_SELECT, false, nullptr},
-                {1680, SimpleInput::BIT_SELECT, true,  "SELECT"}, // item 5 (Color Test)
-                {1682, SimpleInput::BIT_SELECT, false, nullptr},
-                {1720, SimpleInput::BIT_START,  true,  "START"},  // Enter Color Test
-                {1722, SimpleInput::BIT_START,  false, nullptr},
-            };
-            for (const auto& ai : autoInputs) {
-                if (frameCount == ai.frame) {
-                    input.setButton(ai.btn, ai.press);
-                    fprintf(stderr, "[AUTO] Frame %llu: %s %s\n", (unsigned long long)frameCount, ai.name ? ai.name : "REL", ai.press ? "PRESS" : "RELEASE");
-                }
-            }
-            // Non-headless: no extra navigation input needed (Electronics Test is default)
-            }
         }
 
     }

@@ -1,0 +1,203 @@
+{
+  "timestamp": "2026-04-23T01:35:10.802243",
+  "frames_count": 14,
+  "phases_detected": 6,
+  "test_result": "FAIL",
+  "analysis_summary": {
+    "phase_distribution": {
+      "BOOT": 1,
+      "MENU_ANOMALY": 1,
+      "ELECTRONICS_ANOMALY": 4,
+      "CHARACTER_ANOMALY": 2,
+      "CONTROLLER_INPUT_ANOMALY": 4,
+      "SOUND_ANOMALY": 2
+    },
+    "color_stats": {
+      "min": 1,
+      "max": 7,
+      "avg": 6.571428571428571
+    }
+  },
+  "issues": [
+    {
+      "type": "COLOR_ANOMALY",
+      "severity": "MEDIUM",
+      "frame": 60,
+      "phase": "MENU_ANOMALY",
+      "colors": 7,
+      "message": "F:60 MENU_ANOMALY에서 색상 수 이상 (7)"
+    },
+    {
+      "type": "COLOR_ANOMALY",
+      "severity": "MEDIUM",
+      "frame": 85,
+      "phase": "ELECTRONICS_ANOMALY",
+      "colors": 7,
+      "message": "F:85 ELECTRONICS_ANOMALY에서 색상 수 이상 (7)"
+    },
+    {
+      "type": "COLOR_ANOMALY",
+      "severity": "MEDIUM",
+      "frame": 90,
+      "phase": "ELECTRONICS_ANOMALY",
+      "colors": 7,
+      "message": "F:90 ELECTRONICS_ANOMALY에서 색상 수 이상 (7)"
+    },
+    {
+      "type": "COLOR_ANOMALY",
+      "severity": "MEDIUM",
+      "frame": 95,
+      "phase": "ELECTRONICS_ANOMALY",
+      "colors": 7,
+      "message": "F:95 ELECTRONICS_ANOMALY에서 색상 수 이상 (7)"
+    },
+    {
+      "type": "COLOR_ANOMALY",
+      "severity": "MEDIUM",
+      "frame": 120,
+      "phase": "ELECTRONICS_ANOMALY",
+      "colors": 7,
+      "message": "F:120 ELECTRONICS_ANOMALY에서 색상 수 이상 (7)"
+    },
+    {
+      "type": "COLOR_ANOMALY",
+      "severity": "MEDIUM",
+      "frame": 180,
+      "phase": "CHARACTER_ANOMALY",
+      "colors": 7,
+      "message": "F:180 CHARACTER_ANOMALY에서 색상 수 이상 (7)"
+    },
+    {
+      "type": "COLOR_ANOMALY",
+      "severity": "MEDIUM",
+      "frame": 300,
+      "phase": "CHARACTER_ANOMALY",
+      "colors": 7,
+      "message": "F:300 CHARACTER_ANOMALY에서 색상 수 이상 (7)"
+    },
+    {
+      "type": "COLOR_ANOMALY",
+      "severity": "MEDIUM",
+      "frame": 450,
+      "phase": "CONTROLLER_INPUT_ANOMALY",
+      "colors": 7,
+      "message": "F:450 CONTROLLER_INPUT_ANOMALY에서 색상 수 이상 (7)"
+    },
+    {
+      "type": "COLOR_ANOMALY",
+      "severity": "MEDIUM",
+      "frame": 540,
+      "phase": "CONTROLLER_INPUT_ANOMALY",
+      "colors": 7,
+      "message": "F:540 CONTROLLER_INPUT_ANOMALY에서 색상 수 이상 (7)"
+    },
+    {
+      "type": "COLOR_ANOMALY",
+      "severity": "MEDIUM",
+      "frame": 580,
+      "phase": "CONTROLLER_INPUT_ANOMALY",
+      "colors": 7,
+      "message": "F:580 CONTROLLER_INPUT_ANOMALY에서 색상 수 이상 (7)"
+    },
+    {
+      "type": "COLOR_ANOMALY",
+      "severity": "MEDIUM",
+      "frame": 600,
+      "phase": "CONTROLLER_INPUT_ANOMALY",
+      "colors": 7,
+      "message": "F:600 CONTROLLER_INPUT_ANOMALY에서 색상 수 이상 (7)"
+    },
+    {
+      "type": "COLOR_ANOMALY",
+      "severity": "MEDIUM",
+      "frame": 900,
+      "phase": "SOUND_ANOMALY",
+      "colors": 7,
+      "message": "F:900 SOUND_ANOMALY에서 색상 수 이상 (7)"
+    },
+    {
+      "type": "COLOR_ANOMALY",
+      "severity": "MEDIUM",
+      "frame": 1000,
+      "phase": "SOUND_ANOMALY",
+      "colors": 7,
+      "message": "F:1000 SOUND_ANOMALY에서 색상 수 이상 (7)"
+    },
+    {
+      "type": "PHASE_MISSING",
+      "severity": "MEDIUM",
+      "phase": "MENU",
+      "message": "MENU 단계를 거치지 않음"
+    },
+    {
+      "type": "PHASE_MISSING",
+      "severity": "MEDIUM",
+      "phase": "ELECTRONICS",
+      "message": "ELECTRONICS 단계를 거치지 않음"
+    },
+    {
+      "type": "PHASE_MISSING",
+      "severity": "MEDIUM",
+      "phase": "CHARACTER",
+      "message": "CHARACTER 단계를 거치지 않음"
+    },
+    {
+      "type": "PHASE_MISSING",
+      "severity": "MEDIUM",
+      "phase": "CONTROLLER_MENU",
+      "message": "CONTROLLER_MENU 단계를 거치지 않음"
+    }
+  ],
+  "sample_frames": {
+    "30": {
+      "colors": 1,
+      "phase": "BOOT",
+      "description": "부팅 중"
+    },
+    "60": {
+      "colors": 7,
+      "phase": "MENU_ANOMALY",
+      "description": "메인 메뉴 (색상 이상: 7)"
+    },
+    "85": {
+      "colors": 7,
+      "phase": "ELECTRONICS_ANOMALY",
+      "description": "Electronics Test 진행 중 (색상 이상: 7)"
+    },
+    "90": {
+      "colors": 7,
+      "phase": "ELECTRONICS_ANOMALY",
+      "description": "Electronics Test 진행 중 (색상 이상: 7)"
+    },
+    "95": {
+      "colors": 7,
+      "phase": "ELECTRONICS_ANOMALY",
+      "description": "Electronics Test 진행 중 (색상 이상: 7)"
+    },
+    "120": {
+      "colors": 7,
+      "phase": "ELECTRONICS_ANOMALY",
+      "description": "Electronics Test 진행 중 (색상 이상: 7)"
+    },
+    "180": {
+      "colors": 7,
+      "phase": "CHARACTER_ANOMALY",
+      "description": "Character Test 진행 중 (색상 이상: 7)"
+    },
+    "300": {
+      "colors": 7,
+      "phase": "CHARACTER_ANOMALY",
+      "description": "Character Test 진행 중 (색상 이상: 7)"
+    },
+    "450": {
+      "colors": 7,
+      "phase": "CONTROLLER_INPUT_ANOMALY",
+      "description": "Controller Test 버튼 입력 (색상 이상: 7)"
+    },
+    "540": {
+      "colors": 7,
+      "phase": "CONTROLLER_INPUT_ANOMALY",
+      "description": "Controller Test 버튼 입력 (색상 이상: 7)"
+    }
+  }
+}
